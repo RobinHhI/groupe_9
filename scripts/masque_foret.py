@@ -1,48 +1,59 @@
-from osgeo import gdal, ogr
+from osgeo import gdal
 import os
+import sys
+sys.path.append('libsigma')
+
 
 # Chemins d'accès relatifs
 in_vector = "data/vecteurs/FORMATION_VEGETALE.shp"
 ref_image = "data/rasters/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0_FRE_B2.tif"
 out_image = "groupe_9/results/data/img_pretraitees/mask_forest.tif"
 
-def rasterize_with_exact_grid(vector_path, ref_raster_path, output_raster_path):
-    """Rasterise un vecteur en suivant exactement les dimensions et alignements du raster de référence."""
-    # Charger le raster de référence pour obtenir les dimensions et la grille
-    ref_ds = gdal.Open(ref_raster_path)
-    if not ref_ds:
-        raise FileNotFoundError(f"Impossible d'ouvrir le raster de référence : {ref_raster_path}")
-    
-    ref_proj = ref_ds.GetProjection()
-    ref_geotrans = ref_ds.GetGeoTransform()
-    xsize = ref_ds.RasterXSize
-    ysize = ref_ds.RasterYSize
 
-    # Charger le fichier vecteur
-    vector_ds = ogr.Open(vector_path)
-    if not vector_ds:
-        raise FileNotFoundError(f"Impossible d'ouvrir le fichier vecteur : {vector_path}")
-    
-    vector_layer = vector_ds.GetLayer()
+def get_reprojected_raster_properties(input_raster, target_srs):
+    """Reprojete un raster en entrée dans le même EPSG qu'un raster de référence."""
+    temp_raster = gdal.Warp('', input_raster, format='MEM', dstSRS=target_srs)
 
-    # Créer un raster vide avec les dimensions et la grille du raster de référence
-    driver = gdal.GetDriverByName("GTiff")
-    target_ds = driver.Create(output_raster_path, xsize, ysize, 1, gdal.GDT_Byte)
-    target_ds.SetProjection(ref_proj)
-    target_ds.SetGeoTransform(ref_geotrans)
+    geotransform = temp_raster.GetGeoTransform()
+    xmin = geotransform[0]
+    ymax = geotransform[3]
+    pixel_width = geotransform[1]
+    pixel_height = geotransform[5]
+    xmax = xmin + (temp_raster.RasterXSize * pixel_width)
+    ymin = ymax + (temp_raster.RasterYSize * pixel_height)
 
-    # Forets = 1
-    gdal.RasterizeLayer(
-        target_ds, [1], vector_layer,
-        burn_values=[1],
-        options=["COMPRESS=LZW"]  # Option de compression
-    )
+    spatial_resolution = abs(pixel_width)
 
-    # Nettoyage
-    target_ds = None
-    ref_ds = None
-    vector_ds = None
-    print(f"Masque forêt compressé et enregistré dans {output_raster_path}")
+    temp_raster = None
 
-# Appeler la fonction
-rasterize_with_exact_grid(in_vector, ref_image, out_image)
+    return spatial_resolution, xmin, ymin, xmax, ymax
+
+
+# Extraire les propriétés du raster
+sptial_resolution, xmin, ymin, xmax, ymax = get_reprojected_raster_properties(
+    ref_image, "EPSG:2154")
+
+# commande cmd pour le masque avec compression
+cmd_pattern = (
+    "gdal_rasterize -burn 1 "  # foret = 1
+    "-tr {sptial_resolution} {sptial_resolution} "
+    "-te {xmin} {ymin} {xmax} {ymax} -ot Byte -of GTiff "
+    "-co COMPRESS=LZW "
+    "{in_vector} {out_image}"
+)
+
+# Ajout des propriétés au masque raster
+cmd = cmd_pattern.format(
+    in_vector=in_vector,
+    xmin=xmin,
+    ymin=ymin,
+    xmax=xmax,
+    ymax=ymax,
+    out_image=out_image,
+    sptial_resolution=sptial_resolution
+)
+
+# Execution du cmd
+os.system(cmd)
+
+print("Masque forêt compressé et enregistré")
