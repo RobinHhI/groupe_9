@@ -1,7 +1,7 @@
 from osgeo import gdal
 import os
 import sys
-sys.path.append('data_projet/libsigma')
+sys.path.append('libsigma')
 
 
 # Chemins d'accès relatifs

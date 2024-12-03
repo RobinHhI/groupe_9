@@ -10,6 +10,10 @@ PROJET_TELEDETECTION/
 │   │   ├── SENTINEL2B_20220714-105903-040_L2A_T31TCJ_C_V3-0/
 │   │   ├── SENTINEL2B_20220922-105859-863_L2A_T31TCJ_C_V3-1/
 │   │   └── SENTINEL2B_20221111-105858-090_L2A_T31TCJ_C_V3-1/
+├── libsigma/
+│   │   │── classification.py
+│   │   │── manipulation_image.py
+│   │   └── ...
 │   ├── vecteurs/
 │   │   ├── emprise_etude.dbf
 │   │   ├── emprise_etude.prj
