@@ -36,6 +36,8 @@ sptial_resolution, xmin, ymin, xmax, ymax = get_reprojected_raster_properties(
 # commande cmd pour le masque avec compression
 cmd_pattern = (
     "gdal_rasterize -burn 1 "  # foret = 1
+    "-init 0 "
+    "-a_nodata 99 "  # defining the nodata
     "-tr {sptial_resolution} {sptial_resolution} "
     "-te {xmin} {ymin} {xmax} {ymax} -ot Byte -of GTiff "
     "-co COMPRESS=LZW "
