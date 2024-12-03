@@ -5,8 +5,8 @@ import os
 from osgeo import gdal
 
 # Chemins d'accès relatifs
-in_vector = "data_projet/vecteurs/FORMATION_VEGETALE.shp"
-ref_image = "data_projet/rasters/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0_FRE_B2.tif"
+in_vector = "data/vecteurs/FORMATION_VEGETALE.shp"
+ref_image = "data/rasters/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0_FRE_B2.tif"
 out_image = "groupe_9/results/data/img_pretraitees/mask_forest.tif"
 
 def get_reprojected_raster_properties(input_raster, target_srs):
