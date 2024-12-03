@@ -1,11 +1,13 @@
-from osgeo import gdal
-import os
+# Importation des libraires
 import sys
+import os
+from osgeo import gdal
+gdal.UseExceptions()
 sys.path.append('libsigma')
 
 
 # Chemins d'accès relatifs
-in_vector = "data/vecteurs/FORMATION_VEGETALE.shp"
+in_vector = "groupe_9/results/data/sample/Sample_BD_foret_T31TCJ.shp"
 ref_image = "data/rasters/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0/SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0_FRE_B2.tif"
 out_image = "groupe_9/results/data/img_pretraitees/mask_forest.tif"
 
@@ -37,7 +39,7 @@ sptial_resolution, xmin, ymin, xmax, ymax = get_reprojected_raster_properties(
 cmd_pattern = (
     "gdal_rasterize -burn 1 "  # foret = 1
     "-init 0 "
-    "-a_nodata 99 "  # defining the nodata
+    "-a_nodata 99 "  # definition du NoData
     "-tr {sptial_resolution} {sptial_resolution} "
     "-te {xmin} {ymin} {xmax} {ymax} -ot Byte -of GTiff "
     "-co COMPRESS=LZW "
