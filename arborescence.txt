@@ -1,5 +1,5 @@
 PROJET_TELEDETECTION/
-├── data_projet/
+├── data/
 │   ├── rasters/
 │   │   ├── SENTINEL2A_20220209-105857-811_L2A_T31TCJ_C_V3-0/
 │   │   │   ├── DATA/
