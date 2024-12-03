@@ -31,7 +31,7 @@ def rasterize_with_exact_grid(vector_path, ref_raster_path, output_raster_path):
     target_ds.SetProjection(ref_proj)
     target_ds.SetGeoTransform(ref_geotrans)
 
-    # Brûler les valeurs (foret = 1) à l'intérieur du vecteur
+    # Forets = 1
     gdal.RasterizeLayer(
         target_ds, [1], vector_layer,
         burn_values=[1],
