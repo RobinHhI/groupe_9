@@ -1,2 +1,4 @@
 *.tiff
 *.tif
+*.xml
+*.tif.aux.xml
