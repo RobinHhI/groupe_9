@@ -17,7 +17,7 @@ from my_function import find_raster_bands, reproject_raster, clip_raster_to_exte
 # Parameters
 clip_vector = "data/vecteurs/emprise_etude.shp"
 mask_raster = "groupe_9/results/data/img_pretraitees/mask_forest.tif"
-input_folder = "data/rasters/"
+input_folder = "data/images/"
 band_prefixes = ["FRE_B2", "FRE_B3", "FRE_B4", "FRE_B8"]
 output_path = "groupe_9/results/data/img_pretraitees/Serie_temp_S2_allbands.tif"
 
