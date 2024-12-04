@@ -470,7 +470,7 @@ def apply_mask(input_raster, mask_raster_path, nodata_value=0):
         log_error_and_raise(f"Error during masking: {e}")
 
 
-def merge_rasters(raster_list, output_path, pixel_type="UInt16", compression="LZW"):
+def merge_rasters(raster_list, output_path, band_names=None, pixel_type="UInt16", compression="LZW"):
     """
     Merge multiple rasters into a single multiband raster.
 
@@ -480,6 +480,8 @@ def merge_rasters(raster_list, output_path, pixel_type="UInt16", compression="LZ
         List of GDAL datasets to merge.
     output_path : str
         Path to save the final multiband raster.
+    band_names : list, optional
+        List of band names corresponding to the rasters.
     pixel_type : str
         Data type of the output raster (e.g., "UInt16").
     compression : str
@@ -489,11 +491,40 @@ def merge_rasters(raster_list, output_path, pixel_type="UInt16", compression="LZ
     -------
     None
     """
-    vrt_options = gdal.BuildVRTOptions(
-        resampleAlg="bilinear", addAlpha=False, separate=True)
-    vrt = gdal.BuildVRT('', raster_list, options=vrt_options)
-    gdal.Translate(output_path, vrt, format="GTiff", creationOptions=[
-                   f"COMPRESS={compression}"], outputType=gdal.GDT_UInt16)
+    try:
+        logging.info("Merging rasters into a single multiband raster...")
+
+        # Build VRT (Virtual Dataset)
+        vrt_options = gdal.BuildVRTOptions(
+            resampleAlg="bilinear", addAlpha=False, separate=True)
+        vrt = gdal.BuildVRT('', raster_list, options=vrt_options)
+        if vrt is None:
+            log_error_and_raise("Failed to build VRT for merging rasters.")
+
+        # Set band descriptions if band_names are provided
+        if band_names:
+            for i, band_name in enumerate(band_names):
+                band = vrt.GetRasterBand(i + 1)
+                band.SetDescription(band_name)
+
+        # Prepare creation options
+        creation_options = [f"COMPRESS={compression}", "BIGTIFF=YES"]
+
+        # Translate VRT to GeoTIFF
+        gdal.Translate(output_path, vrt, format="GTiff",
+                       creationOptions=creation_options,
+                       outputType=getattr(gdal, f"GDT_{pixel_type}"))
+
+        # Release datasets
+        vrt = None
+        for ds in raster_list:
+            ds = None
+
+        logging.info(f"Multiband raster saved to: {output_path}")
+
+    except Exception as e:
+        log_error_and_raise(f"Error during merging rasters: {e}")
+
 
 # ================================= #
 # === FILE MANAGEMENT FUNCTIONS === #
@@ -502,23 +533,26 @@ def merge_rasters(raster_list, output_path, pixel_type="UInt16", compression="LZ
 
 def find_raster_bands(folder_path, band_prefixes):
     """
-    Find and filter raster bands based on prefixes and FRE criteria.
+    Find and filter raster bands based on prefixes.
 
     Parameters:
     ----------
     folder_path : str
         Path to the folder containing raster files.
     band_prefixes : list
-        List of band prefixes to filter (e.g., ["B02", "B03", ...]).
+        List of band prefixes to filter (e.g., ["FRE_B2", "FRE_B3", "FRE_B4", "FRE_B8"]).
 
     Returns:
     -------
     list
-        List of paths to the filtered raster files with "FRE" in the name.
+        List of paths to the filtered raster files ending with '.tif' and matching the band prefixes.
     """
     raster_files = []
     for root, dirs, files in os.walk(folder_path):
         for file in files:
-            if any(prefix in file for prefix in band_prefixes) and "FRE" in file:
-                raster_files.append(os.path.join(root, file))
+            # Check if the file ends with '.tif'
+            if file.endswith('.tif'):
+                # Check if the file contains any of the specified band prefixes
+                if any(prefix in file for prefix in band_prefixes):
+                    raster_files.append(os.path.join(root, file))
     return sorted(raster_files)
