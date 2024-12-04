@@ -46,4 +46,4 @@ PROJET_TELEDETECTION/
 │   ├── scripts/
 │   │   ├── ...
 │   │   └── masque_foret.py
-└── .gitignore
+|   └── .gitignore
