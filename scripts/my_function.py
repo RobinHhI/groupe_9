@@ -251,24 +251,63 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
     try:
         logging.info("Creating forest mask...")
 
-        # Step 1: Reproject the reference raster
+        # Step 1: Reproject the reference raster to get the desired properties
         logging.info("Reprojecting reference raster to EPSG:2154...")
         ref_raster_reprojected = reproject_raster(
             reference_raster, "EPSG:2154")
         pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs = get_raster_properties(
-            ref_raster_reprojected
-        )
+            ref_raster_reprojected)
 
-        # Release the reference raster immediately after extracting properties
+        # Release the reference raster after extracting properties
         ref_raster_reprojected = None
 
         # Align bounds to match the resolution
         xmin_aligned = xmin - (xmin % pixel_width)
-        ymin_aligned = ymin - (ymin % pixel_width)
+        ymin_aligned = ymin - (ymin % pixel_height)
         xmax_aligned = xmax + (pixel_width - (xmax % pixel_width))
-        ymax_aligned = ymax + (pixel_width - (ymax % pixel_width))
+        ymax_aligned = ymax + (pixel_height - (ymax % pixel_height))
 
-        # Step 2: Check if the output file already exists and remove it
+        # Calculate the number of pixels in x and y directions
+        x_pixels = int((xmax_aligned - xmin_aligned) / pixel_width)
+        y_pixels = int((ymax_aligned - ymin_aligned) / pixel_height)
+
+        # Step 2: Create an in-memory raster to rasterize the vector mask
+        logging.info("Rasterizing forest mask...")
+        mem_driver = gdal.GetDriverByName('MEM')
+        out_raster = mem_driver.Create(
+            '', x_pixels, y_pixels, 1, gdal.GDT_Byte)
+        out_raster.SetGeoTransform(
+            (xmin_aligned, pixel_width, 0, ymax_aligned, 0, -pixel_height))
+        out_raster.SetProjection(crs)
+
+        # Initialize raster with value 1 (forest)
+        out_band = out_raster.GetRasterBand(1)
+        out_band.Fill(1)
+        out_band.SetNoDataValue(99)
+
+        # Open the vector mask
+        vector_ds = gdal.OpenEx(mask_vector, gdal.OF_VECTOR)
+        if vector_ds is None:
+            log_error_and_raise(f"Cannot open vector file: {mask_vector}")
+
+        # Rasterize the vector mask onto the raster, burning value 0 (non-forest)
+        err = gdal.RasterizeLayer(
+            out_raster, [1], vector_ds.GetLayer(), burn_values=[0])
+        if err != 0:
+            log_error_and_raise("Rasterization failed.")
+
+        # Close the vector dataset
+        vector_ds = None
+
+        # Step 3: Clip the rasterized mask to the study area
+        logging.info("Clipping the forest mask to the study area...")
+        clipped_mask = clip_raster_to_extent(out_raster, clip_vector)
+
+        if clipped_mask is None:
+            log_error_and_raise("Failed to clip the forest mask.")
+
+        # Step 4: Save the clipped mask to the output path
+        # Before saving, ensure any existing file is deleted
         if os.path.exists(output_path):
             try:
                 os.remove(output_path)
@@ -277,36 +316,21 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
                 log_error_and_raise(
                     f"Failed to remove existing file: {output_path}")
 
-        # Step 3: Rasterize the forest mask
-        logging.info("Rasterizing forest mask...")
-        cmd = (
-            # Forest = 1, Non-forest = 0, NoData = 99
-            f"gdal_rasterize -burn 0 -init 1 -a_nodata 99 "
-            # Aligned bounds
-            f"-te {xmin_aligned} {ymin_aligned} {xmax_aligned} {ymax_aligned} "
-            # Byte type with compression
-            f"-tr {pixel_width} {pixel_height} -ot Byte -of GTiff "
-            f"-co COMPRESS=LZW {mask_vector} {output_path}"  # Compress output
-        )
-        os.system(cmd)
-
-        # Step 4: Open the raster for further processing
-        logging.info("Clipping the forest mask to the study area...")
-        raster_ds = gdal.Open(output_path, gdal.GA_Update)
-        if raster_ds is None:
+        driver = gdal.GetDriverByName('GTiff')
+        output_ds = driver.CreateCopy(
+            output_path, clipped_mask, options=["COMPRESS=LZW"])
+        if output_ds is None:
             log_error_and_raise(
-                f"Failed to open intermediate forest mask: {output_path}")
+                f"Failed to save the forest mask to: {output_path}")
 
-        # Clip the mask to the study area
-        clipped_mask = clip_raster_to_extent(raster_ds, clip_vector)
+        # Flush and close the output dataset
+        output_ds.FlushCache()
+        output_ds = None
 
-        # Save the clipped mask
-        gdal.Translate(output_path, clipped_mask, format="GTiff",
-                       creationOptions=["COMPRESS=LZW"])
-
-        # Release resources
-        raster_ds = None
+        # Release datasets
+        out_raster = None
         clipped_mask = None
+
         logging.info(f"Forest mask saved to: {output_path}")
 
     except Exception as e:
@@ -380,16 +404,16 @@ def resample_raster(input_raster, pixel_size):
         log_error_and_raise(f"Error during resampling: {e}")
 
 
-def apply_mask(input_raster, mask_raster, nodata_value=0):
+def apply_mask(input_raster, mask_raster_path, nodata_value=0):
     """
-    Apply a mask to a raster.
+    Apply a raster mask to a raster.
 
     Parameters:
     ----------
     input_raster : gdal.Dataset
         Input raster in memory.
-    mask_raster : gdal.Dataset
-        Mask raster in memory.
+    mask_raster_path : str
+        Path to the mask raster file.
     nodata_value : int
         Value for masked areas.
 
@@ -405,17 +429,43 @@ def apply_mask(input_raster, mask_raster, nodata_value=0):
     """
     try:
         logging.info("Applying mask to raster...")
-        masked = gdal.Warp(
-            '', input_raster, format="MEM",
-            cutlineDSName=mask_raster, cropToCutline=True, dstNodata=nodata_value
-        )
-        if masked is None:
-            log_error_and_raise("Failed to apply mask.")
 
-        # Release the input raster and mask raster after applying the mask
+        # Open the mask raster
+        mask_ds = gdal.Open(mask_raster_path)
+        if mask_ds is None:
+            log_error_and_raise(f"Cannot open mask raster: {mask_raster_path}")
+
+        # Ensure the input raster and mask raster have the same dimensions
+        if (input_raster.RasterXSize != mask_ds.RasterXSize) or (input_raster.RasterYSize != mask_ds.RasterYSize):
+            log_error_and_raise(
+                "Input raster and mask raster have different dimensions.")
+
+        # Read the input raster and mask raster as arrays
+        input_band = input_raster.GetRasterBand(1)
+        input_data = input_band.ReadAsArray()
+
+        mask_band = mask_ds.GetRasterBand(1)
+        mask_data = mask_band.ReadAsArray()
+
+        # Apply the mask: set nodata_value where mask_data == 0
+        input_data[mask_data == 0] = nodata_value
+
+        # Create a new in-memory raster to hold the masked data
+        driver = gdal.GetDriverByName('MEM')
+        out_ds = driver.Create('', input_raster.RasterXSize,
+                               input_raster.RasterYSize, 1, input_band.DataType)
+        out_ds.SetGeoTransform(input_raster.GetGeoTransform())
+        out_ds.SetProjection(input_raster.GetProjection())
+        out_band = out_ds.GetRasterBand(1)
+        out_band.WriteArray(input_data)
+        out_band.SetNoDataValue(nodata_value)
+
+        # Release datasets
+        mask_ds = None
         input_raster = None
-        mask_raster = None
-        return masked
+
+        return out_ds
+
     except Exception as e:
         log_error_and_raise(f"Error during masking: {e}")
 
