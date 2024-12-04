@@ -2,3 +2,4 @@
 *.tif
 *.xml
 *.tif.aux.xml
+*.pyc
