@@ -13,6 +13,7 @@ Last modified: Dec 03, 2024
 """
 import os
 import logging
+import numpy as np
 from osgeo import gdal
 import geopandas as gpd
 
@@ -62,25 +63,34 @@ def reclassification_dictionary():
         - `Nom` (str): The classification name.
     """
     return {
+        "Forêt fermée d’un autre feuillu pur": (11, "Autres feuillus"),
         "Forêt fermée de châtaignier pur": (11, "Autres feuillus"),
         "Forêt fermée de hêtre pur": (11, "Autres feuillus"),
+
         "Forêt fermée de chênes décidus purs": (12, "Chêne"),
         "Forêt fermée de robinier pur": (13, "Robinier"),
         "Peupleraie": (14, "Peupleraie"),
         "Forêt fermée à mélange de feuillus": (15, "Mélange de feuillus"),
         "Forêt fermée de feuillus purs en îlots": (16, "Feuillus en îlots"),
-        "Forêt fermée d’un autre conifère pur autre que pin": (21, "Autres conifères autre que pin"),
+
+        "Forêt fermée d’un autre conifère pur autre que pin ": (21, "Autres conifères autre que pin"),
         "Forêt fermée de mélèze pur": (21, "Autres conifères autre que pin"),
         "Forêt fermée de sapin ou épicéa": (21, "Autres conifères autre que pin"),
         "Forêt fermée à mélange d’autres conifères": (21, "Autres conifères autre que pin"),
-        "Forêt fermée de pin sylvestre pur": (22, "Autres Pin"),
-        "Forêt fermée à mélange de pins purs": (22, "Autres Pin"),
+
+        "Forêt fermée d’un autre pin pur": (22, "Autres pin"),
+        "Forêt fermée de pin sylvestre pur": (22, "Autres pin"),
+        "Forêt fermée à mélange de pins purs": (22, "Autres pin"),
+
         "Forêt fermée de douglas pur": (23, "Douglas"),
         "Forêt fermée de pin laricio ou pin noir pur": (24, "Pin laricio ou pin noir"),
         "Forêt fermée de pin maritime pur": (25, "Pin maritime"),
         "Forêt fermée à mélange de conifères": (26, "Mélange conifères"),
-        "Forêt fermée de conifères prépondérants et feuillus": (28, "Mélange de conifères prépondérants et feuillus"),
-        "Forêt fermée à mélange de feuillus prépondérants et conifères": (29, "Mélange de feuillus prépondérants et conifères"),
+        "Forêt fermée de conifères purs en îlots": (27, "Conifères en îlots"),
+
+        "Forêt fermée à mélange de conifères prépondérants et feuillus": (28, "Mélange de conifères prépondérants et feuillus"),
+        "Forêt fermée à mélange de feuillus prépondérants et conifères": (29, "Mélange de feuillus préponderants conifères")
+
     }
 
 
@@ -96,29 +106,93 @@ def filter_and_reclassify(gdf):
     Returns:
     -------
     GeoDataFrame
-        A filtered and reclassified GeoDataFrame with only the attributes `Nom`, `Code`, and `geometry`.
+        A filtered and reclassified GeoDataFrame with existing attributes plus `Nom` and `Code`.
     """
-    # Get the reclassification dictionary
-    reclassification = reclassification_dictionary()
+    try:
+        logging.info("Starting filter and reclassification of GeoDataFrame.")
 
-    # Filter based on the categories in the dictionary
-    categories_to_keep = list(reclassification.keys())
-    filtered_gdf = gdf[gdf["TFV"].isin(categories_to_keep)].copy()
+        # Get the reclassification dictionary
+        reclassification = reclassification_dictionary()
 
-    # Add `Nom` and `Code` attributes based on the reclassification
-    filtered_gdf["Nom"] = filtered_gdf["TFV"].map(
-        lambda x: reclassification[x][1])
-    filtered_gdf["Code"] = filtered_gdf["TFV"].map(
-        lambda x: reclassification[x][0])
+        # Filter based on the categories in the dictionary
+        categories_to_keep = list(reclassification.keys())
+        filtered_gdf = gdf[gdf["TFV"].isin(categories_to_keep)].copy()
 
-    # Keep only the columns `Nom`, `Code`, and `geometry`
-    filtered_gdf = filtered_gdf[["Nom", "Code", "geometry"]]
+        if filtered_gdf.empty:
+            log_error_and_raise(
+                "No features found after filtering based on TFV categories.")
 
-    return filtered_gdf
+        logging.info(
+            f"Filtered GeoDataFrame to {len(filtered_gdf)} features based on TFV categories.")
+
+        # Add `Nom` and `Code` attributes based on the reclassification
+        filtered_gdf["Nom"] = filtered_gdf["TFV"].map(
+            lambda x: reclassification[x][1])
+        filtered_gdf["Code"] = filtered_gdf["TFV"].map(
+            lambda x: reclassification[x][0])
+
+        logging.info("Added 'Nom' and 'Code' attributes to GeoDataFrame.")
+
+        return filtered_gdf
+
+    except Exception as e:
+        log_error_and_raise(
+            f"Error during filtering and reclassification: {e}")
+
 
 # ============================= #
 # === VECTOR FILE FUNCTIONS === #
 # ============================= #
+def clip_vector_to_extent(gdf, clip_shapefile):
+    """
+    Clip a GeoDataFrame to the extent of a shapefile without adding attributes from the clipping shapefile.
+
+    Parameters:
+    ----------
+    gdf : GeoDataFrame
+        Input GeoDataFrame to clip.
+    clip_shapefile : str
+        Path to the shapefile defining the clipping extent.
+
+    Returns:
+    -------
+    GeoDataFrame
+        Clipped GeoDataFrame with attributes only from the input GeoDataFrame.
+
+    Raises:
+    ------
+    RuntimeError
+        If the clipping process fails.
+    """
+    try:
+        logging.info(
+            f"Clipping GeoDataFrame using shapefile: {clip_shapefile}")
+
+        # Read the clipping shapefile
+        clip_gdf = gpd.read_file(clip_shapefile)
+        if clip_gdf.empty:
+            log_error_and_raise(
+                f"Clipping shapefile {clip_shapefile} is empty.")
+
+        # Ensure CRS matches
+        if gdf.crs != clip_gdf.crs:
+            logging.info(
+                "Reprojecting GeoDataFrame to match clipping shapefile CRS.")
+            gdf = gdf.to_crs(clip_gdf.crs)
+
+        # Perform the clipping using geopandas.clip
+        clipped_gdf = gpd.clip(gdf, clip_gdf)
+
+        if clipped_gdf.empty:
+            log_error_and_raise("No features found after clipping operation.")
+
+        logging.info(
+            f"Clipped GeoDataFrame contains {len(clipped_gdf)} features.")
+
+        return clipped_gdf
+
+    except Exception as e:
+        log_error_and_raise(f"Error during clipping GeoDataFrame: {e}")
 
 
 def save_vector_file(gdf, output_path):
@@ -136,12 +210,17 @@ def save_vector_file(gdf, output_path):
     -------
     None
     """
-    gdf.to_file(output_path, driver="ESRI Shapefile")
+    try:
+        logging.info(f"Saving GeoDataFrame to file: {output_path}")
+        gdf.to_file(output_path, driver="ESRI Shapefile")
+        logging.info("GeoDataFrame saved successfully.")
+    except Exception as e:
+        log_error_and_raise(f"Error saving GeoDataFrame to file: {e}")
+
 
 # =================================== #
 # === RASTER PROCESSING FUNCTIONS === #
 # =================================== #
-
 
 def get_raster_properties(dataset):
     """
@@ -280,9 +359,9 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
             (xmin_aligned, pixel_width, 0, ymax_aligned, 0, -pixel_height))
         out_raster.SetProjection(crs)
 
-        # Initialize raster with value 1 (forest)
-        out_band = out_raster.GetRasterBand(1)
-        out_band.Fill(1)
+        # Initialize raster with value 0 (non-forest)
+        out_band = out_raster.GetRasterBand(1)  # Bands are 1-indexed
+        out_band.Fill(0)
         out_band.SetNoDataValue(99)
 
         # Open the vector mask
@@ -290,9 +369,9 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
         if vector_ds is None:
             log_error_and_raise(f"Cannot open vector file: {mask_vector}")
 
-        # Rasterize the vector mask onto the raster, burning value 0 (non-forest)
+        # Rasterize the vector mask onto the raster, burning value 1 (forest)
         err = gdal.RasterizeLayer(
-            out_raster, [1], vector_ds.GetLayer(), burn_values=[0])
+            out_raster, [1], vector_ds.GetLayer(), burn_values=[1])
         if err != 0:
             log_error_and_raise("Rasterization failed.")
 
@@ -301,7 +380,8 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
 
         # Step 3: Clip the rasterized mask to the study area
         logging.info("Clipping the forest mask to the study area...")
-        clipped_mask = clip_raster_to_extent(out_raster, clip_vector)
+        clipped_mask = clip_raster_to_extent(
+            out_raster, clip_vector, nodata_value=99)
 
         if clipped_mask is None:
             log_error_and_raise("Failed to clip the forest mask.")
@@ -337,16 +417,18 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
         log_error_and_raise(f"Error during forest mask creation: {e}")
 
 
-def clip_raster_to_extent(input_raster, clip_vector):
+def clip_raster_to_extent(input_raster, clip_vector, nodata_value):
     """
     Clip a raster to a shapefile's extent.
 
     Parameters:
     ----------
-    input_raster : gdal.Dataset
-        Input raster in memory.
+    input_raster : gdal.Dataset or str
+        Input raster in memory or file path.
     clip_vector : str
         Path to the shapefile for clipping.
+    nodata_value : int or float
+        NoData value to set in the output raster.
 
     Returns:
     -------
@@ -364,14 +446,18 @@ def clip_raster_to_extent(input_raster, clip_vector):
             log_error_and_raise(
                 f"Shapefile not found: {clip_vector}", FileNotFoundError)
 
-        clipped = gdal.Warp('', input_raster, format="MEM",
-                            cutlineDSName=clip_vector, cropToCutline=True)
+        clipped = gdal.Warp(
+            '', input_raster, format="MEM",
+            cutlineDSName=clip_vector, cropToCutline=True,
+            dstNodata=nodata_value
+        )
         if clipped is None:
             log_error_and_raise(
                 f"Failed to clip raster with shapefile: {clip_vector}")
 
         # Release the input raster after clipping
-        input_raster = None
+        if isinstance(input_raster, gdal.Dataset):
+            input_raster = None
         return clipped
     except Exception as e:
         log_error_and_raise(f"Error during clipping: {e}")
@@ -404,9 +490,9 @@ def resample_raster(input_raster, pixel_size):
         log_error_and_raise(f"Error during resampling: {e}")
 
 
-def apply_mask(input_raster, mask_raster_path, nodata_value=0):
+def apply_mask(input_raster, mask_raster_path, nodata_value):
     """
-    Apply a raster mask to a raster.
+    Apply a raster mask to a raster, setting non-forest areas to the NoData value.
 
     Parameters:
     ----------
@@ -414,8 +500,8 @@ def apply_mask(input_raster, mask_raster_path, nodata_value=0):
         Input raster in memory.
     mask_raster_path : str
         Path to the mask raster file.
-    nodata_value : int
-        Value for masked areas.
+    nodata_value : int or float
+        Value for NoData areas (non-forest and invalid data).
 
     Returns:
     -------
@@ -447,8 +533,8 @@ def apply_mask(input_raster, mask_raster_path, nodata_value=0):
         mask_band = mask_ds.GetRasterBand(1)
         mask_data = mask_band.ReadAsArray()
 
-        # Apply the mask: set nodata_value where mask_data == 0
-        input_data[mask_data == 0] = nodata_value
+        # Apply the mask: set non-forest areas to nodata_value
+        input_data = np.where(mask_data == 1, input_data, nodata_value)
 
         # Create a new in-memory raster to hold the masked data
         driver = gdal.GetDriverByName('MEM')
@@ -470,7 +556,78 @@ def apply_mask(input_raster, mask_raster_path, nodata_value=0):
         log_error_and_raise(f"Error during masking: {e}")
 
 
-def merge_rasters(raster_list, output_path, band_names=None, pixel_type="UInt16", compression="LZW"):
+def calculate_ndvi_from_processed_bands(red_raster, nir_raster, nodata_value=-9999):
+    """
+    Calculate NDVI from already processed red and NIR rasters.
+
+    Parameters:
+    ----------
+    red_raster : gdal.Dataset
+        GDAL dataset for the processed red band.
+    nir_raster : gdal.Dataset
+        GDAL dataset for the processed NIR band.
+    nodata_value : float, optional
+        NoData value to set in the output raster (default: -9999).
+
+    Returns:
+    -------
+    gdal.Dataset
+        GDAL in-memory dataset containing the NDVI values.
+
+    Raises:
+    ------
+    RuntimeError
+        If any step in the process fails.
+    """
+    try:
+        logging.info("Calculating NDVI from processed bands...")
+
+        # Ensure the rasters have the same dimensions
+        if (red_raster.RasterXSize != nir_raster.RasterXSize) or (red_raster.RasterYSize != nir_raster.RasterYSize):
+            log_error_and_raise(
+                "Red and NIR rasters have different dimensions.")
+
+        # Read the data as arrays
+        red_band = red_raster.GetRasterBand(1)
+        nir_band = nir_raster.GetRasterBand(1)
+        red_data = red_band.ReadAsArray().astype('float32')
+        nir_data = nir_band.ReadAsArray().astype('float32')
+
+        # Get NoData values
+        red_nodata = red_band.GetNoDataValue()
+        nir_nodata = nir_band.GetNoDataValue()
+
+        # Create a mask for NoData values
+        mask = (red_data == red_nodata) | (nir_data == nir_nodata)
+
+        # Suppress division warnings
+        np.seterr(divide='ignore', invalid='ignore')
+
+        # Calculate NDVI
+        ndvi = (nir_data - red_data) / (nir_data + red_data)
+        ndvi = np.where(mask, nodata_value, ndvi)
+
+        # Create an in-memory raster for NDVI
+        driver = gdal.GetDriverByName('MEM')
+        ndvi_raster = driver.Create(
+            '', red_raster.RasterXSize, red_raster.RasterYSize, 1, gdal.GDT_Float32)
+        ndvi_raster.SetGeoTransform(red_raster.GetGeoTransform())
+        ndvi_raster.SetProjection(red_raster.GetProjection())
+        ndvi_band = ndvi_raster.GetRasterBand(1)
+        ndvi_band.WriteArray(ndvi)
+        ndvi_band.SetNoDataValue(nodata_value)
+
+        # Release datasets
+        red_raster = None
+        nir_raster = None
+
+        return ndvi_raster
+
+    except Exception as e:
+        log_error_and_raise(f"Error during NDVI calculation: {e}")
+
+
+def merge_rasters(raster_list, output_path, band_names, pixel_type, compression="LZW", nodata_value=None):
     """
     Merge multiple rasters into a single multiband raster.
 
@@ -483,9 +640,11 @@ def merge_rasters(raster_list, output_path, band_names=None, pixel_type="UInt16"
     band_names : list, optional
         List of band names corresponding to the rasters.
     pixel_type : str
-        Data type of the output raster (e.g., "UInt16").
+        Data type of the output raster (e.g., "UInt16", "Float32").
     compression : str
         Compression type for the output raster (default: "LZW").
+    nodata_value : int or float, optional
+        NoData value to set in the output raster bands.
 
     Returns:
     -------
@@ -496,16 +655,18 @@ def merge_rasters(raster_list, output_path, band_names=None, pixel_type="UInt16"
 
         # Build VRT (Virtual Dataset)
         vrt_options = gdal.BuildVRTOptions(
-            resampleAlg="bilinear", addAlpha=False, separate=True)
+            resampleAlg="nearest", addAlpha=False, separate=True)
         vrt = gdal.BuildVRT('', raster_list, options=vrt_options)
         if vrt is None:
             log_error_and_raise("Failed to build VRT for merging rasters.")
 
-        # Set band descriptions if band_names are provided
-        if band_names:
-            for i, band_name in enumerate(band_names):
-                band = vrt.GetRasterBand(i + 1)
-                band.SetDescription(band_name)
+        # Set band descriptions and NoData values if provided
+        for i in range(vrt.RasterCount):
+            band = vrt.GetRasterBand(i + 1)
+            if band_names and i < len(band_names):
+                band.SetDescription(band_names[i])
+            if nodata_value is not None:
+                band.SetNoDataValue(nodata_value)
 
         # Prepare creation options
         creation_options = [f"COMPRESS={compression}", "BIGTIFF=YES"]
@@ -555,4 +716,4 @@ def find_raster_bands(folder_path, band_prefixes):
                 # Check if the file contains any of the specified band prefixes
                 if any(prefix in file for prefix in band_prefixes):
                     raster_files.append(os.path.join(root, file))
-    return sorted(raster_files)
+    return raster_files
