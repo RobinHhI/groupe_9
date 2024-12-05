@@ -14,7 +14,7 @@ Last modified: Dec 03, 2024
 import os
 import logging
 import numpy as np
-from osgeo import gdal
+from osgeo import gdal, ogr
 import geopandas as gpd
 import matplotlib.pyplot as plt
 
@@ -726,11 +726,6 @@ def find_raster_bands(folder_path, band_prefixes):
 # =========================== #
 
 # Initialisation du logger
-import logging
-import numpy as np
-import geopandas as gpd
-import matplotlib.pyplot as plt
-from osgeo import gdal
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger()
@@ -738,9 +733,9 @@ logger = logging.getLogger()
 def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, output_dir):
     """
     Fonction pour analyser les échantillons : 
-    - Créer un diagramme bâton du nombre de polygones par classe.
-    - Créer un diagramme bâton du nombre de pixels par classe.
-    - Créer un violin plot de la distribution du nombre de pixels par classe de polygone.
+    - 1 Créer un diagramme bâton du nombre de polygones par classe.
+    - 2 Créer un diagramme bâton du nombre de pixels du raster de référence par classe.
+    - 3 Créer un violin plot de la distribution du nombre de pixels par classe de polygone.
 
     :param shapefile_path: Chemin du fichier shapefile
     :param raster_path: Chemin du fichier raster
@@ -754,162 +749,50 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     # Charger le raster
     logger.info("Chargement du fichier raster...")
     dataset = gdal.Open(raster_path)
-    band = dataset.GetRasterBand(1)  # Lire la première bande du raster
+    band = dataset.GetRasterBand(1)
     raster_array = band.ReadAsArray()
-
-    # Obtenir les informations du raster
     geo_transform = dataset.GetGeoTransform()
 
     # Spécifiez la colonne contenant les classes
     classe_colonne = "Nom"
 
-    # Filtrer le GeoDataFrame pour ne conserver que les classes spécifiées
+    # Filtrer les classes spécifiées
     logger.info(f"Filtrage des classes spécifiées dans {classes_a_conserver}...")
     gdf_filtre = gdf[gdf[classe_colonne].isin(classes_a_conserver)]
 
-    # Vérifier si des classes restent après le filtrage
     if gdf_filtre.empty:
         logger.warning(f"Aucune des classes spécifiées dans {classes_a_conserver} n'a été trouvée dans le fichier.")
-    else:
-        # Compter le nombre de polygones par classe pour les classes filtrées
-        class_counts = gdf_filtre[classe_colonne].value_counts()
+        return
 
-        # Créer un diagramme en bâtons du nombre de polygones
-        logger.info("Création du diagramme en bâtons du nombre de polygones...")
-        plt.figure(figsize=(12, 8))
-        bar_color = "skyblue"
-        bar_edge_color = "black"
-        bars = plt.bar(
-            class_counts.index,  # Noms des classes
-            class_counts.values,  # Nombre de polygones
-            color=bar_color, 
-            edgecolor=bar_edge_color
+    # 1. Diagramme bâton du nombre de polygones par classe
+    logger.info("Création du diagramme en bâtons pour le nombre de polygones...")
+    class_counts = gdf_filtre[classe_colonne].value_counts()
+    plt.figure(figsize=(10, 6))
+
+    # Création des barres
+    bars = plt.bar(class_counts.index, class_counts.values, color='skyblue', edgecolor='black')
+
+    # Ajouter les valeurs au-dessus des barres
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,  # Position x
+            height + 0.5,  # Position y (juste au-dessus de la barre)
+            f'{int(height)}',  # Texte (valeur entière)
+            ha='center', va='bottom', fontsize=10  # Alignement et taille de la police
         )
 
-        # Ajouter des étiquettes au-dessus des barres
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(
-                bar.get_x() + bar.get_width() / 2, 
-                height + 0.5,  
-                f"{int(height)}", 
-                ha="center", va="bottom", fontsize=12
-            )
+    # Ajouter le titre et les labels
+    plt.title("Nombre de polygones par classe", fontsize=16)
+    plt.xlabel("Classe", fontsize=12)
+    plt.ylabel("Nombre de polygones", fontsize=12)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
 
-        # Ajouter des titres et des labels
-        plt.title("Nombre de polygones par classe (filtré)", fontsize=18, weight="bold")
-        plt.xlabel("Classe", fontsize=14)
-        plt.ylabel("Nombre de polygones", fontsize=14)
-        plt.xticks(rotation=45, ha="right", fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.grid(axis="y", linestyle="--", alpha=0.7)
-        plt.tight_layout()
+    # Enregistrer le graphique
+    output_path = f"{output_dir}/diag_baton_nb_poly_by_class.png"
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+    logger.info(f"Diagramme sauvegardé : {output_path}")
 
-        # Enregistrer le diagramme en tant qu'image PNG
-        output_path = f"{output_dir}/diag_baton_nb_poly_by_class.png"
-        plt.savefig(output_path, dpi=300)
-        plt.close()  # Fermer la fenêtre du graphique
-        logger.info(f"Le diagramme a été sauvegardé dans {output_path}")
-
-        # Préparation des données pour le diagramme bâton du nombre de pixels
-        pixel_counts_by_class = {}
-
-        logger.info("Calcul du nombre de pixels par polygone...")
-        # Itérer sur les polygones pour extraire le nombre de pixels par classe
-        for _, row in gdf_filtre.iterrows():
-            # Extraire la géométrie du polygone
-            geometry = row.geometry
-            if geometry.is_valid and geometry.geom_type == 'Polygon':
-                # Obtenir les coordonnées du polygone
-                ring = geometry.exterior.coords
-                x_coords, y_coords = zip(*ring)
-                x_coords = np.array(x_coords)
-                y_coords = np.array(y_coords)
-
-                # Convertir les coordonnées géographiques en indices de pixels du raster
-                x_pixels = np.floor((x_coords - geo_transform[0]) / geo_transform[1]).astype(int)
-                y_pixels = np.floor((y_coords - geo_transform[3]) / geo_transform[5]).astype(int)
-
-                # Créer un masque pour les pixels à l'intérieur du polygone
-                mask = np.zeros_like(raster_array, dtype=bool)
-                for x, y in zip(x_pixels, y_pixels):
-                    if 0 <= x < raster_array.shape[1] and 0 <= y < raster_array.shape[0]:
-                        mask[y, x] = True
-
-                # Appliquer le masque et compter les pixels
-                masked_pixels = raster_array[mask]
-                num_pixels = np.count_nonzero(~np.isnan(masked_pixels))  # Compter les pixels non NaN
-
-                # Ajouter le nombre de pixels à la classe correspondante
-                classe = row[classe_colonne]
-                if classe in pixel_counts_by_class:
-                    pixel_counts_by_class[classe].append(num_pixels)
-                else:
-                    pixel_counts_by_class[classe] = [num_pixels]
-
-        # Créer un diagramme en bâtons du nombre de pixels par classe
-        logger.info("Création du diagramme en bâtons du nombre de pixels...")
-        pixel_counts_total = {classe: sum(pixel_counts) for classe, pixel_counts in pixel_counts_by_class.items()}
-
-        plt.figure(figsize=(12, 8))
-        bars = plt.bar(
-            pixel_counts_total.keys(),
-            pixel_counts_total.values(),
-            color=bar_color,
-            edgecolor=bar_edge_color
-        )
-
-        # Ajouter des étiquettes au-dessus des barres
-        for bar in bars:
-            height = bar.get_height()
-            plt.text(
-                bar.get_x() + bar.get_width() / 2,
-                height + 0.5,
-                f"{int(height)}",
-                ha="center", va="bottom", fontsize=12
-            )
-
-        # Ajouter des titres et des labels
-        plt.title("Nombre total de pixels par classe", fontsize=18, weight="bold")
-        plt.xlabel("Classe", fontsize=14)
-        plt.ylabel("Nombre total de pixels", fontsize=14)
-        plt.xticks(rotation=45, ha="right", fontsize=12)
-        plt.yticks(fontsize=12)
-        plt.grid(axis="y", linestyle="--", alpha=0.7)
-        plt.tight_layout()
-
-        # Enregistrer le diagramme en tant qu'image PNG
-        output_path_pixels = f"{output_dir}/diag_baton_nb_pix_by_class.png"
-        plt.savefig(output_path_pixels, dpi=300)
-        plt.close()  # Fermer la fenêtre du graphique
-        logger.info(f"Le diagramme du nombre de pixels a été sauvegardé dans {output_path_pixels}")
-
-        # Créer un violin plot 
-        logger.info("Création du violin plot...")
-        plt.figure(figsize=(12, 8))
-
-        # Créer le plot sans médianes ni boîtes
-        plt.violinplot([pixel_counts_by_class[classe] for classe in classes_a_conserver], showmedians=False, showextrema=False)
-
-        # Ajouter des titres et des labels
-        plt.title("Distribution du nombre de pixels par classe de polygone", fontsize=18, weight="bold")
-        plt.xlabel("Classe", fontsize=14)
-        plt.ylabel("Nombre de pixels", fontsize=14)
-        plt.xticks(range(1, len(classes_a_conserver) + 1), classes_a_conserver, rotation=45, ha="right", fontsize=12)
-        plt.yticks(fontsize=12)
-
-        # Ajuster l'échelle pour fixer le max à 500
-        plt.ylim(0, 500)
-
-        # Ajouter une grille discrète pour plus de lisibilité
-        plt.grid(axis='y', linestyle='--', alpha=0.6)
-
-        # Améliorer l'apparence des axes
-        plt.tight_layout()
-
-        # Enregistrer le violin plot en tant qu'image PNG
-        output_path_violin = f"{output_dir}/violin_plot_nb_pix_by_poly_by_class.png"
-        plt.savefig(output_path_violin, dpi=300)
-        plt.close()  # Fermer la fenêtre du graphique
-        logger.info(f"Le violin plot a été sauvegardé dans {output_path_violin}")
-
+  

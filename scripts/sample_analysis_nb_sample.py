@@ -6,7 +6,7 @@ Analyse des échantillons de la BD forêt
 Ce script permet de réaliser une analyse des échantillons de la BD forêt filtrée.
 
 1. Produit un diagramme bâton du nombre de polygones par classe.
-2. Créer un diagramme bâton du nombre de pixels par classe.
+2. Produit un diagramme bâton du nombre de pixels par classe
 3. Produit un violin plot de la distribution du nombre de pixels par classe de polygone.
 
 Créé le 5 décembre 2024
