@@ -726,6 +726,12 @@ def find_raster_bands(folder_path, band_prefixes):
 # =========================== #
 
 # Initialisation du logger
+import logging
+import numpy as np
+import geopandas as gpd
+import matplotlib.pyplot as plt
+from osgeo import gdal
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger()
 
@@ -733,6 +739,7 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     """
     Fonction pour analyser les échantillons : 
     - Créer un diagramme bâton du nombre de polygones par classe.
+    - Créer un diagramme bâton du nombre de pixels par classe.
     - Créer un violin plot de la distribution du nombre de pixels par classe de polygone.
 
     :param shapefile_path: Chemin du fichier shapefile
@@ -767,8 +774,8 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
         # Compter le nombre de polygones par classe pour les classes filtrées
         class_counts = gdf_filtre[classe_colonne].value_counts()
 
-        # Créer un diagramme en bâtons
-        logger.info("Création du diagramme en bâtons...")
+        # Créer un diagramme en bâtons du nombre de polygones
+        logger.info("Création du diagramme en bâtons du nombre de polygones...")
         plt.figure(figsize=(12, 8))
         bar_color = "skyblue"
         bar_edge_color = "black"
@@ -804,7 +811,7 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
         plt.close()  # Fermer la fenêtre du graphique
         logger.info(f"Le diagramme a été sauvegardé dans {output_path}")
 
-        # Préparation des données pour le violin plot
+        # Préparation des données pour le diagramme bâton du nombre de pixels
         pixel_counts_by_class = {}
 
         logger.info("Calcul du nombre de pixels par polygone...")
@@ -840,10 +847,49 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
                 else:
                     pixel_counts_by_class[classe] = [num_pixels]
 
+        # Créer un diagramme en bâtons du nombre de pixels par classe
+        logger.info("Création du diagramme en bâtons du nombre de pixels...")
+        pixel_counts_total = {classe: sum(pixel_counts) for classe, pixel_counts in pixel_counts_by_class.items()}
+
+        plt.figure(figsize=(12, 8))
+        bars = plt.bar(
+            pixel_counts_total.keys(),
+            pixel_counts_total.values(),
+            color=bar_color,
+            edgecolor=bar_edge_color
+        )
+
+        # Ajouter des étiquettes au-dessus des barres
+        for bar in bars:
+            height = bar.get_height()
+            plt.text(
+                bar.get_x() + bar.get_width() / 2,
+                height + 0.5,
+                f"{int(height)}",
+                ha="center", va="bottom", fontsize=12
+            )
+
+        # Ajouter des titres et des labels
+        plt.title("Nombre total de pixels par classe", fontsize=18, weight="bold")
+        plt.xlabel("Classe", fontsize=14)
+        plt.ylabel("Nombre total de pixels", fontsize=14)
+        plt.xticks(rotation=45, ha="right", fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.grid(axis="y", linestyle="--", alpha=0.7)
+        plt.tight_layout()
+
+        # Enregistrer le diagramme en tant qu'image PNG
+        output_path_pixels = f"{output_dir}/diag_baton_nb_pix_by_class.png"
+        plt.savefig(output_path_pixels, dpi=300)
+        plt.close()  # Fermer la fenêtre du graphique
+        logger.info(f"Le diagramme du nombre de pixels a été sauvegardé dans {output_path_pixels}")
+
         # Créer un violin plot 
         logger.info("Création du violin plot...")
         plt.figure(figsize=(12, 8))
-        plt.violinplot([pixel_counts_by_class[classe] for classe in classes_a_conserver], showmedians=True)
+
+        # Créer le plot sans médianes ni boîtes
+        plt.violinplot([pixel_counts_by_class[classe] for classe in classes_a_conserver], showmedians=False, showextrema=False)
 
         # Ajouter des titres et des labels
         plt.title("Distribution du nombre de pixels par classe de polygone", fontsize=18, weight="bold")
@@ -852,6 +898,9 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
         plt.xticks(range(1, len(classes_a_conserver) + 1), classes_a_conserver, rotation=45, ha="right", fontsize=12)
         plt.yticks(fontsize=12)
 
+        # Ajuster l'échelle pour fixer le max à 500
+        plt.ylim(0, 500)
+
         # Ajouter une grille discrète pour plus de lisibilité
         plt.grid(axis='y', linestyle='--', alpha=0.6)
 
@@ -859,7 +908,8 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
         plt.tight_layout()
 
         # Enregistrer le violin plot en tant qu'image PNG
-        output_path_violin = f"{output_dir}/violin_plot_pixels_by_class_simple.png"
+        output_path_violin = f"{output_dir}/violin_plot_nb_pix_by_poly_by_class.png"
         plt.savefig(output_path_violin, dpi=300)
         plt.close()  # Fermer la fenêtre du graphique
         logger.info(f"Le violin plot a été sauvegardé dans {output_path_violin}")
+
