@@ -17,10 +17,17 @@ from my_function_robin import sample_data_analysis
 shapefile_path = "groupe_9/results/data/sample/Sample_BD_foret_T31TCJ.shp"
 raster_path = "groupe_9/results/data/img_pretraitees/Serie_temp_S2_ndvi.tif"
 classes_a_conserver = [
-    "Autres feuillus", "Chêne", "Robinier", "Peupleraie", 
-    "Autres conifères autre que pin", "Autres pin", 
-    "Douglas", "Pin laricio ou pin noir", "Pin maritime"
+    "Autres conifères autre que pin",
+    "Autres feuillus",
+    "Autres pin",
+    "Chêne",
+    "Douglas",
+    "Peupleraie",
+    "Pin laricio ou pin noir",
+    "Pin maritime",
+    "Robinier"
 ]
+
 output_dir = "groupe_9/results/figure"
 
 sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, output_dir)

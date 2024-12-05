@@ -14,9 +14,10 @@ Last modified: Dec 03, 2024
 import os
 import logging
 import numpy as np
-from osgeo import gdal, ogr
+from osgeo import gdal, ogr, osr
 import geopandas as gpd
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # GDAL configuration
 gdal.UseExceptions()
@@ -742,6 +743,11 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     :param classes_a_conserver: Liste des classes à conserver
     :param output_dir: Dossier où les graphiques seront sauvegardés
     """
+    # Vérifier et créer le répertoire de sortie si nécessaire
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        logger.info(f"Création du répertoire de sortie : {output_dir}")
+
     # Charger le fichier shapefile
     logger.info("Chargement du fichier shapefile...")
     gdf = gpd.read_file(shapefile_path)
@@ -749,16 +755,22 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     # Charger le raster
     logger.info("Chargement du fichier raster...")
     dataset = gdal.Open(raster_path)
+    if dataset is None:
+        logger.error(f"Impossible de charger le fichier raster : {raster_path}")
+        return
     band = dataset.GetRasterBand(1)
     raster_array = band.ReadAsArray()
     geo_transform = dataset.GetGeoTransform()
+    projection = dataset.GetProjection()
+    cols = dataset.RasterXSize
+    rows = dataset.RasterYSize
 
     # Spécifiez la colonne contenant les classes
     classe_colonne = "Nom"
 
     # Filtrer les classes spécifiées
     logger.info(f"Filtrage des classes spécifiées dans {classes_a_conserver}...")
-    gdf_filtre = gdf[gdf[classe_colonne].isin(classes_a_conserver)]
+    gdf_filtre = gdf[gdf[classe_colonne].isin(classes_a_conserver)].copy()
 
     if gdf_filtre.empty:
         logger.warning(f"Aucune des classes spécifiées dans {classes_a_conserver} n'a été trouvée dans le fichier.")
@@ -767,19 +779,20 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     # 1. Diagramme bâton du nombre de polygones par classe
     logger.info("Création du diagramme en bâtons pour le nombre de polygones...")
     class_counts = gdf_filtre[classe_colonne].value_counts()
+    class_counts_sorted = class_counts.sort_values(ascending=False)
     plt.figure(figsize=(10, 6))
 
     # Création des barres
-    bars = plt.bar(class_counts.index, class_counts.values, color='skyblue', edgecolor='black')
+    bars = plt.bar(class_counts_sorted.index, class_counts_sorted.values, color='skyblue', edgecolor='black')
 
     # Ajouter les valeurs au-dessus des barres
     for bar in bars:
         height = bar.get_height()
         plt.text(
-            bar.get_x() + bar.get_width() / 2,  # Position x
-            height + 0.5,  # Position y (juste au-dessus de la barre)
-            f'{int(height)}',  # Texte (valeur entière)
-            ha='center', va='bottom', fontsize=10  # Alignement et taille de la police
+            bar.get_x() + bar.get_width() / 2,
+            height + 0.5,
+            f'{int(height)}',
+            ha='center', va='bottom', fontsize=10
         )
 
     # Ajouter le titre et les labels
@@ -790,9 +803,150 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     plt.tight_layout()
 
     # Enregistrer le graphique
-    output_path = f"{output_dir}/diag_baton_nb_poly_by_class.png"
+    output_path = os.path.join(output_dir, "diag_baton_nb_poly_by_class.png")
     plt.savefig(output_path, dpi=300)
     plt.close()
-    logger.info(f"Diagramme sauvegardé : {output_path}")
+    logger.info(f"Diagramme bâton des polygones sauvegardé : {output_path}")
 
-  
+    # 2. Diagramme bâton du nombre de pixels du raster par classe
+    logger.info("Rasterisation des polygones pour compter les pixels par classe...")
+
+    # Classes avec des identifiants uniques
+    class_to_id = {classe: idx + 1 for idx, classe in enumerate(classes_a_conserver)}
+
+    # Rasteriser en mémoire
+    mem_driver = gdal.GetDriverByName('MEM')
+    rasterized_ds = mem_driver.Create(
+        '',
+        cols,
+        rows,
+        1,
+        gdal.GDT_Byte
+    )
+    rasterized_ds.SetGeoTransform(geo_transform)
+    rasterized_ds.SetProjection(projection)
+    rasterized_ds.GetRasterBand(1).SetNoDataValue(0)
+    rasterized_ds.GetRasterBand(1).Fill(0)
+
+    # Définir le système de référence
+    source_srs = osr.SpatialReference()
+    source_srs.ImportFromWkt(projection)
+
+    for classe, id_val in class_to_id.items():
+        logger.info(f"Rasterisation de la classe '{classe}' avec l'ID {id_val}...")
+        gdf_classe = gdf_filtre[gdf_filtre[classe_colonne] == classe]
+        if gdf_classe.empty:
+            logger.warning(f"Aucune géométrie trouvée pour la classe '{classe}'.")
+            continue
+        gdf_classe = gdf_classe.to_crs(source_srs.ExportToWkt())
+        mem_ogr_driver = ogr.GetDriverByName('Memory')
+        mem_ogr_ds = mem_ogr_driver.CreateDataSource('memData')
+        mem_ogr_layer = mem_ogr_ds.CreateLayer('memLayer', srs=source_srs, geom_type=ogr.wkbPolygon)
+
+        for geom in gdf_classe.geometry:
+            if geom is None or geom.is_empty:
+                continue
+            feature = ogr.Feature(mem_ogr_layer.GetLayerDefn())
+            ogr_geom = ogr.CreateGeometryFromWkb(geom.wkb)
+            feature.SetGeometry(ogr_geom)
+            mem_ogr_layer.CreateFeature(feature)
+            feature = None
+
+        # Rasteriser la couche en mémoire
+        err = gdal.RasterizeLayer(
+            rasterized_ds,
+            [1],
+            mem_ogr_layer,
+            burn_values=[id_val]
+        )
+        if err != gdal.CE_None:
+            logger.error(f"Erreur lors de la rasterisation de la classe '{classe}'.")
+        mem_ogr_ds = None
+
+    # Lire les données rasterisées en mémoire
+    rasterized_array = rasterized_ds.GetRasterBand(1).ReadAsArray()
+    rasterized_ds = None
+
+    logger.info("Comptage des pixels par classe...")
+    pixels_per_class = {classe: np.sum(rasterized_array == id_val) for classe, id_val in class_to_id.items()}
+
+    pixels_per_class_sorted = dict(sorted(pixels_per_class.items(), key=lambda item: item[1], reverse=True))
+
+    plt.figure(figsize=(10, 6))
+    classes = list(pixels_per_class_sorted.keys())
+    counts = list(pixels_per_class_sorted.values())
+    bars = plt.bar(classes, counts, color='lightgreen', edgecolor='black')
+
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            height + max(counts) * 0.01,
+            f'{int(height)}',
+            ha='center', va='bottom', fontsize=10
+        )
+
+    plt.title("Nombre de pixels du raster par classe", fontsize=16)
+    plt.xlabel("Classe", fontsize=12)
+    plt.ylabel("Nombre de pixels", fontsize=12)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+
+    output_path_pixels = os.path.join(output_dir, "diag_baton_nb_pixels_by_class.png")
+    plt.savefig(output_path_pixels, dpi=300)
+    plt.close()
+    logger.info(f"Diagramme bâton des pixels sauvegardé : {output_path_pixels}")
+
+    # 3. Création du violin plot de la distribution du nombre de pixels par classe de polygone
+    logger.info("Calcul du nombre de pixels par polygone pour chaque classe...")
+
+    # Calcul de la surface de chaque polygone
+    logger.info("Calcul de la surface de chaque polygone...")
+    gdf_filtre['area'] = gdf_filtre.geometry.area
+
+    # Obtenir la taille d'un pixel du raster
+    pixel_width = geo_transform[1]
+    pixel_height = -geo_transform[5]
+
+    # Calculer la surface d'un pixel
+    pixel_area = pixel_width * pixel_height
+
+    logger.info(f"Taille d'un pixel : largeur={pixel_width}, hauteur={pixel_height}, surface={pixel_area}")
+
+    # Calculer le nombre de pixels par polygone
+    gdf_filtre['pixel_count'] = gdf_filtre['area'] / pixel_area
+
+    # Créer un DataFrame avec les colonnes 'Classe' et 'pixel_count'
+    df_pixels_per_polygon = gdf_filtre[[classe_colonne, 'pixel_count']].copy()
+
+    # Limiter le 'pixel_count' au maximum de 15 000 pour éliminer les outliers
+    df_pixels_per_polygon['pixel_count_clipped'] = df_pixels_per_polygon['pixel_count'].clip(upper=15000)
+
+    # Calculer le maximum du nombre de pixels par classe pour ordonner les violons
+    max_pixels_per_class = df_pixels_per_polygon.groupby(classe_colonne)['pixel_count_clipped'].max()
+
+    # Trier les classes dans l'ordre décroissant du maximum
+    sorted_classes = max_pixels_per_class.sort_values(ascending=False).index.tolist()
+
+    # Création du violin plot
+    logger.info("Création du violin plot de la distribution du nombre de pixels par classe de polygone...")
+    plt.figure(figsize=(12, 8))
+    sns.violinplot(
+        x=classe_colonne,
+        y='pixel_count_clipped',
+        data=df_pixels_per_polygon,
+        inner='box',
+        palette='Set2',
+        order=sorted_classes
+    )
+    plt.title("Distribution du nombre de pixels par classe de polygone", fontsize=16)
+    plt.xlabel("Classe", fontsize=12)
+    plt.ylabel("Nombre de pixels par polygone", fontsize=12)
+    plt.xticks(rotation=45)
+    plt.ylim(0, 15000) 
+    plt.tight_layout()
+
+    output_path_violin = os.path.join(output_dir, "violin_plot_nb_pix_by_poly_by_class.png")
+    plt.savefig(output_path_violin, dpi=300)
+    plt.close()
+    logger.info(f"Violin plot de la distribution des pixels par polygone sauvegardé : {output_path_violin}")
