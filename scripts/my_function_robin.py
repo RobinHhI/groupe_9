@@ -17,7 +17,6 @@ import numpy as np
 from osgeo import gdal, ogr, osr
 import geopandas as gpd
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 # GDAL configuration
 gdal.UseExceptions()
@@ -736,7 +735,7 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     Fonction pour analyser les échantillons : 
     - 1 Créer un diagramme bâton du nombre de polygones par classe.
     - 2 Créer un diagramme bâton du nombre de pixels du raster de référence par classe.
-    - 3 Créer un violin plot de la distribution du nombre de pixels par classe de polygone.
+    - 3 Créer un violon plot de la distribution du nombre de pixels par classe de polygone, amélioré visuellement.
 
     :param shapefile_path: Chemin du fichier shapefile
     :param raster_path: Chemin du fichier raster
@@ -781,28 +780,16 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     class_counts = gdf_filtre[classe_colonne].value_counts()
     class_counts_sorted = class_counts.sort_values(ascending=False)
     plt.figure(figsize=(10, 6))
-
-    # Création des barres
     bars = plt.bar(class_counts_sorted.index, class_counts_sorted.values, color='skyblue', edgecolor='black')
-
-    # Ajouter les valeurs au-dessus des barres
     for bar in bars:
         height = bar.get_height()
-        plt.text(
-            bar.get_x() + bar.get_width() / 2,
-            height + 0.5,
-            f'{int(height)}',
-            ha='center', va='bottom', fontsize=10
-        )
+        plt.text(bar.get_x() + bar.get_width() / 2, height + 0.5, f'{int(height)}', ha='center', va='bottom', fontsize=10)
 
-    # Ajouter le titre et les labels
     plt.title("Nombre de polygones par classe", fontsize=16)
     plt.xlabel("Classe", fontsize=12)
     plt.ylabel("Nombre de polygones", fontsize=12)
     plt.xticks(rotation=45)
     plt.tight_layout()
-
-    # Enregistrer le graphique
     output_path = os.path.join(output_dir, "diag_baton_nb_poly_by_class.png")
     plt.savefig(output_path, dpi=300)
     plt.close()
@@ -810,25 +797,14 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
 
     # 2. Diagramme bâton du nombre de pixels du raster par classe
     logger.info("Rasterisation des polygones pour compter les pixels par classe...")
-
-    # Classes avec des identifiants uniques
     class_to_id = {classe: idx + 1 for idx, classe in enumerate(classes_a_conserver)}
-
-    # Rasteriser en mémoire
     mem_driver = gdal.GetDriverByName('MEM')
-    rasterized_ds = mem_driver.Create(
-        '',
-        cols,
-        rows,
-        1,
-        gdal.GDT_Byte
-    )
+    rasterized_ds = mem_driver.Create('', cols, rows, 1, gdal.GDT_Byte)
     rasterized_ds.SetGeoTransform(geo_transform)
     rasterized_ds.SetProjection(projection)
     rasterized_ds.GetRasterBand(1).SetNoDataValue(0)
     rasterized_ds.GetRasterBand(1).Fill(0)
 
-    # Définir le système de référence
     source_srs = osr.SpatialReference()
     source_srs.ImportFromWkt(projection)
 
@@ -842,7 +818,6 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
         mem_ogr_driver = ogr.GetDriverByName('Memory')
         mem_ogr_ds = mem_ogr_driver.CreateDataSource('memData')
         mem_ogr_layer = mem_ogr_ds.CreateLayer('memLayer', srs=source_srs, geom_type=ogr.wkbPolygon)
-
         for geom in gdf_classe.geometry:
             if geom is None or geom.is_empty:
                 continue
@@ -852,101 +827,78 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
             mem_ogr_layer.CreateFeature(feature)
             feature = None
 
-        # Rasteriser la couche en mémoire
-        err = gdal.RasterizeLayer(
-            rasterized_ds,
-            [1],
-            mem_ogr_layer,
-            burn_values=[id_val]
-        )
-        if err != gdal.CE_None:
-            logger.error(f"Erreur lors de la rasterisation de la classe '{classe}'.")
+        gdal.RasterizeLayer(rasterized_ds, [1], mem_ogr_layer, burn_values=[id_val])
         mem_ogr_ds = None
 
-    # Lire les données rasterisées en mémoire
     rasterized_array = rasterized_ds.GetRasterBand(1).ReadAsArray()
     rasterized_ds = None
-
-    logger.info("Comptage des pixels par classe...")
     pixels_per_class = {classe: np.sum(rasterized_array == id_val) for classe, id_val in class_to_id.items()}
-
     pixels_per_class_sorted = dict(sorted(pixels_per_class.items(), key=lambda item: item[1], reverse=True))
 
     plt.figure(figsize=(10, 6))
     classes = list(pixels_per_class_sorted.keys())
     counts = list(pixels_per_class_sorted.values())
     bars = plt.bar(classes, counts, color='lightgreen', edgecolor='black')
-
     for bar in bars:
         height = bar.get_height()
-        plt.text(
-            bar.get_x() + bar.get_width() / 2,
-            height + max(counts) * 0.01,
-            f'{int(height)}',
-            ha='center', va='bottom', fontsize=10
-        )
+        plt.text(bar.get_x() + bar.get_width() / 2, height + max(counts) * 0.01, f'{int(height)}', ha='center', va='bottom', fontsize=10)
 
     plt.title("Nombre de pixels du raster par classe", fontsize=16)
     plt.xlabel("Classe", fontsize=12)
     plt.ylabel("Nombre de pixels", fontsize=12)
     plt.xticks(rotation=45)
     plt.tight_layout()
-
     output_path_pixels = os.path.join(output_dir, "diag_baton_nb_pixels_by_class.png")
     plt.savefig(output_path_pixels, dpi=300)
     plt.close()
     logger.info(f"Diagramme bâton des pixels sauvegardé : {output_path_pixels}")
 
-    # 3. Création du violin plot de la distribution du nombre de pixels par classe de polygone
-    logger.info("Calcul du nombre de pixels par polygone pour chaque classe...")
-
-    # Calcul de la surface de chaque polygone
-    logger.info("Calcul de la surface de chaque polygone...")
+    # 3. Création du violon plot
+    logger.info("Création du violon plot...")
     gdf_filtre['area'] = gdf_filtre.geometry.area
-
-    # Obtenir la taille d'un pixel du raster
     pixel_width = geo_transform[1]
     pixel_height = -geo_transform[5]
-
-    # Calculer la surface d'un pixel
     pixel_area = pixel_width * pixel_height
-
-    logger.info(f"Taille d'un pixel : largeur={pixel_width}, hauteur={pixel_height}, surface={pixel_area}")
-
-    # Calculer le nombre de pixels par polygone
     gdf_filtre['pixel_count'] = gdf_filtre['area'] / pixel_area
 
-    # Créer un DataFrame avec les colonnes 'Classe' et 'pixel_count'
     df_pixels_per_polygon = gdf_filtre[[classe_colonne, 'pixel_count']].copy()
-
-    # Limiter le 'pixel_count' au maximum de 15 000 pour éliminer les outliers
     df_pixels_per_polygon['pixel_count_clipped'] = df_pixels_per_polygon['pixel_count'].clip(upper=15000)
-
-    # Calculer le maximum du nombre de pixels par classe pour ordonner les violons
     max_pixels_per_class = df_pixels_per_polygon.groupby(classe_colonne)['pixel_count_clipped'].max()
-
-    # Trier les classes dans l'ordre décroissant du maximum
     sorted_classes = max_pixels_per_class.sort_values(ascending=False).index.tolist()
 
-    # Création du violin plot
-    logger.info("Création du violin plot de la distribution du nombre de pixels par classe de polygone...")
+    violin_data = [
+        df_pixels_per_polygon[df_pixels_per_polygon[classe_colonne] == classe]['pixel_count_clipped'].dropna().values
+        for classe in sorted_classes
+    ]
+
     plt.figure(figsize=(12, 8))
-    sns.violinplot(
-        x=classe_colonne,
-        y='pixel_count_clipped',
-        data=df_pixels_per_polygon,
-        inner='box',
-        palette='Set2',
-        order=sorted_classes
-    )
+    # Création du violon plot
+    violin_parts = plt.violinplot(violin_data, showmeans=False, showextrema=False, showmedians=False)
+
+    # Choix des couleurs sur un dégradé
+    cmap = plt.cm.get_cmap('viridis')
+    for i, pc in enumerate(violin_parts['bodies']):
+        pc.set_facecolor(cmap((i+1)/len(violin_data)))
+        pc.set_edgecolor('black')
+        pc.set_alpha(0.7)
+
+    # Calcul et affichage des médianes et moyennes
+    for i, data in enumerate(violin_data):
+        median = np.median(data)
+        mean = np.mean(data)
+        x_pos = i+1
+        # Ligne pour la médiane
+        plt.plot([x_pos-0.2, x_pos+0.2], [median, median], color='black', linewidth=1)
+      
     plt.title("Distribution du nombre de pixels par classe de polygone", fontsize=16)
     plt.xlabel("Classe", fontsize=12)
     plt.ylabel("Nombre de pixels par polygone", fontsize=12)
-    plt.xticks(rotation=45)
-    plt.ylim(0, 15000) 
+    plt.xticks(ticks=range(1, len(sorted_classes) + 1), labels=sorted_classes, rotation=45)
+    plt.ylim(0, 15000)
+    plt.grid(True, linestyle='--', alpha=0.5)
     plt.tight_layout()
 
     output_path_violin = os.path.join(output_dir, "violin_plot_nb_pix_by_poly_by_class.png")
     plt.savefig(output_path_violin, dpi=300)
     plt.close()
-    logger.info(f"Violin plot de la distribution des pixels par polygone sauvegardé : {output_path_violin}")
+    logger.info(f"Violin plot sauvegardé : {output_path_violin}")
