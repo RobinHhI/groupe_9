@@ -279,10 +279,7 @@ def analyse_ndvi_par_classe(raster_path, shapefile_path, classes_interet, nom_ch
     # Filtrage des classes d'intérêt
     logger.info(f"Filtrage sur les classes d'intérêt : {classes_interet}")
     gdf_filtre = gdf[gdf[nom_champ].isin(classes_interet)]
-       
-    # Récupération des classes uniques
     classes_uniques = gdf_filtre[nom_champ].unique()
-    logger.info(f"Classes retenues : {classes_uniques}")
 
     # Dictionnaire pour stocker les stats
     stats_par_classe = {}
