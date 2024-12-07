@@ -10,7 +10,6 @@ Il produit des subplots de séries temporelles de NDVI pour les classes indiqué
 Créé le 6 décembre 2024
 """
 
-import geopandas as gpd
 from my_function_robin import analyse_ndvi_par_classe
 
 
