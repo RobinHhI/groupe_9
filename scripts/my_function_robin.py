@@ -284,7 +284,7 @@ def analyse_ndvi_par_classe(raster_path, shapefile_path, classes_interet, nom_ch
     # Dictionnaire pour stocker les stats
     stats_par_classe = {}
     
-    # Création d'une datasource mémoire OGR
+    # Création d'une datasource mémoire
     driver = ogr.GetDriverByName('Memory')
     data_source = driver.CreateDataSource('temp')
     srs = osr.SpatialReference()
