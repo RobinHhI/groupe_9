@@ -128,20 +128,39 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     plt.figure(figsize=(10, 6))
     classes = list(pixels_per_class_sorted.keys())
     counts = list(pixels_per_class_sorted.values())
+
+    # Ajustement de la limite supérieure de l'axe Y
+    y_max = max(counts) * 1.1
+    plt.ylim(0, y_max)
+
     bars = plt.bar(classes, counts, color='lightgreen', edgecolor='black')
+
+    # Ajout des étiquettes avec un décalage ajusté
     for bar in bars:
         height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width() / 2, height + max(counts) * 0.01, f'{int(height)}', ha='center', va='bottom', fontsize=10)
+        plt.text(
+            bar.get_x() + bar.get_width() / 2,
+            height + max(counts) * 0.02,
+            f'{int(height)}',
+            ha='center',
+            va='bottom',
+            fontsize=10
+        )
 
     plt.title("Nombre de pixels du raster par classe", fontsize=16)
     plt.xlabel("Classe", fontsize=12)
     plt.ylabel("Nombre de pixels", fontsize=12)
     plt.xticks(rotation=45)
+
+    # Ajustement des marges
     plt.tight_layout()
+
+    # Sauvegarde du graphique
     output_path_pixels = os.path.join(output_dir, "diag_baton_nb_pixels_by_class.png")
     plt.savefig(output_path_pixels, dpi=300)
     plt.close()
     logger.info(f"Diagramme bâton des pixels sauvegardé : {output_path_pixels}")
+
 
     # 3. Création du violon plot
     logger.info("Création du violon plot...")
@@ -162,8 +181,9 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     ]
 
     plt.figure(figsize=(12, 8))
+
     # Création du violon plot
-    violin_parts = plt.violinplot(violin_data, showmeans=False, showextrema=False, showmedians=False)
+    violin_parts = plt.violinplot(violin_data, showmeans=False, showextrema=False, showmedians=True)
 
     # Choix des couleurs sur un dégradé
     cmap = plt.cm.get_cmap('viridis')
@@ -172,26 +192,24 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
         pc.set_edgecolor('black')
         pc.set_alpha(0.7)
 
-    # Calcul et affichage des médianes et moyennes
-    for i, data in enumerate(violin_data):
-        median = np.median(data)
-        mean = np.mean(data)
-        x_pos = i+1
-        # Ligne pour la médiane
-        plt.plot([x_pos-0.2, x_pos+0.2], [median, median], color='black', linewidth=1)
-      
+    # Ajout de la légende pour la médiane
+    plt.legend([plt.Line2D([0], [0], color='black', linewidth=1)], ["Médiane"], loc='upper right')
+
+    # Configuration du graphique
     plt.title("Distribution du nombre de pixels par classe de polygone", fontsize=16)
     plt.xlabel("Classe", fontsize=12)
     plt.ylabel("Nombre de pixels par polygone", fontsize=12)
     plt.xticks(ticks=range(1, len(sorted_classes) + 1), labels=sorted_classes, rotation=45)
     plt.ylim(0, 15000)
     plt.grid(True, linestyle='--', alpha=0.5)
-    plt.tight_layout()
 
+    # Sauvegarde du plot
+    plt.tight_layout()
     output_path_violin = os.path.join(output_dir, "violin_plot_nb_pix_by_poly_by_class.png")
     plt.savefig(output_path_violin, dpi=300)
     plt.close()
     logger.info(f"Violin plot sauvegardé : {output_path_violin}")
+
 
 
 def analyse_ndvi_par_classe(raster_path, shapefile_path, classes_interet, nom_champ=None, 

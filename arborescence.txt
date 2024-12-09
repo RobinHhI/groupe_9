@@ -34,7 +34,7 @@ PROJET_TELEDETECTION/
 │   │       ├── diag_baton_nb_poly_by_class.png
 │   │       └── ...
 │   ├── scripts/
-│   │   ├── masque_foret.py
+│   │   ├── build_mask.py
 │   │   └── ...
 │   ├── arborescence.txt
 |   └── .gitignore
