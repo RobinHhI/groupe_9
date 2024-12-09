@@ -25,7 +25,7 @@ total_start_time = time.time()
 
 # Paramètres
 clip_vector = "data/project/emprise_etude.shp"
-mask_raster = "groupe_9/results/data/img_pretraitees/mask_forest.tif"
+mask_raster = "groupe_9/results/data/img_pretraitees/masque_foret.tif"
 input_folder = "data/images/"
 band_prefixes = ["FRE_B2", "FRE_B3", "FRE_B4", "FRE_B5",
                  "FRE_B6", "FRE_B7", "FRE_B8", "FRE_B8A", "FRE_B11", "FRE_B12"]
