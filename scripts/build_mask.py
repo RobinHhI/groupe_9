@@ -25,7 +25,7 @@ else:
     reference_image = reference_images[0]
 
 clip_vector = "data/project/emprise_etude.shp"
-output_image = "groupe_9/results/data/img_pretraitees/mask_forest.tif"
+output_image = "groupe_9/results/data/img_pretraitees/masque_foret.tif"
 
 # Créer le masque
 create_forest_mask(mask_vector, reference_image, clip_vector, output_image)
