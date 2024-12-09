@@ -15,7 +15,7 @@ Créé le 5 décembre 2024
 from my_function_robin import sample_data_analysis
 
 shapefile_path = "groupe_9/results/data/sample/Sample_BD_foret_T31TCJ.shp"
-raster_path = "groupe_9/results/data/img_pretraitees/mask_forest.tif"
+raster_path = "groupe_9/results/data/img_pretraitees/masque_foret.tif"
 classes_a_conserver = [
     "Autres conifères autre que pin",
     "Autres feuillus",
@@ -30,4 +30,5 @@ classes_a_conserver = [
 
 output_dir = "groupe_9/results/figure"
 
-sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, output_dir)
+sample_data_analysis(shapefile_path, raster_path,
+                     classes_a_conserver, output_dir)
