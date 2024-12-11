@@ -7,7 +7,7 @@ This module provides functions to filter and reclassify geospatial data,
 manage vector files, and process rasters with GDAL, all with integrated logger.
 
 Created on Dec 03, 2024
-Last modified: Dec 03, 2024
+Last modified: Dec 11, 2024
 
 @author: Alban Dumont, Lucas Lima, Robin Heckendorn
 """
@@ -18,6 +18,8 @@ import traceback
 import numpy as np
 from osgeo import gdal
 import geopandas as gpd
+from rasterstats import zonal_stats
+import matplotlib.pyplot as plt
 
 # GDAL configuration
 gdal.UseExceptions()
@@ -32,7 +34,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # =========================== #
-# === UTILITY FUNCTIONS === #
+# === UTILITY FUNCTIONS ===== #
 # =========================== #
 
 
