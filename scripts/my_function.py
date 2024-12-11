@@ -4,7 +4,7 @@
 Functions for Geospatial Data Processing
 
 This module provides functions to filter and reclassify geospatial data,
-manage vector files, and process rasters with GDAL, all with integrated logging.
+manage vector files, and process rasters with GDAL, all with integrated logger.
 
 Created on Dec 03, 2024
 Last modified: Dec 03, 2024
@@ -13,6 +13,8 @@ Last modified: Dec 03, 2024
 """
 import os
 import logging
+import sys
+import traceback
 import numpy as np
 from osgeo import gdal
 import geopandas as gpd
@@ -20,12 +22,14 @@ import geopandas as gpd
 # GDAL configuration
 gdal.UseExceptions()
 
-# Logging configuration
+# logger configuration
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler("process_log.log")]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
+# Using the logger
+logger = logging.getLogger(__name__)
 
 # =========================== #
 # === UTILITY FUNCTIONS === #
@@ -34,7 +38,7 @@ logging.basicConfig(
 
 def log_error_and_raise(message, exception=RuntimeError):
     """
-    Logs an error message and raises an exception.
+    Logs an error message, includes traceback, and raises an exception.
 
     Parameters:
     ----------
@@ -43,7 +47,7 @@ def log_error_and_raise(message, exception=RuntimeError):
     exception : Exception
         Type of exception to raise (default: RuntimeError).
     """
-    logging.error(message)
+    logger.error(f"{message}\n{traceback.format_exc()}")
     raise exception(message)
 
 # ================================== #
@@ -109,7 +113,7 @@ def filter_and_reclassify(gdf):
         A filtered and reclassified GeoDataFrame with existing attributes plus `Nom` and `Code`.
     """
     try:
-        logging.info("Starting filter and reclassification of GeoDataFrame.")
+        logger.info("Starting filter and reclassification of GeoDataFrame.")
 
         # Get the reclassification dictionary
         reclassification = reclassification_dictionary()
@@ -122,7 +126,7 @@ def filter_and_reclassify(gdf):
             log_error_and_raise(
                 "No features found after filtering based on TFV categories.")
 
-        logging.info(
+        logger.info(
             f"Filtered GeoDataFrame to {len(filtered_gdf)} features based on TFV categories.")
 
         # Add `Nom` and `Code` attributes based on the reclassification
@@ -131,7 +135,7 @@ def filter_and_reclassify(gdf):
         filtered_gdf["Code"] = filtered_gdf["TFV"].map(
             lambda x: reclassification[x][0])
 
-        logging.info("Added 'Nom' and 'Code' attributes to GeoDataFrame.")
+        logger.info("Added 'Nom' and 'Code' attributes to GeoDataFrame.")
 
         return filtered_gdf
 
@@ -165,7 +169,7 @@ def clip_vector_to_extent(gdf, clip_shapefile):
         If the clipping process fails.
     """
     try:
-        logging.info(
+        logger.info(
             f"Clipping GeoDataFrame using shapefile: {clip_shapefile}")
 
         # Read the clipping shapefile
@@ -176,7 +180,7 @@ def clip_vector_to_extent(gdf, clip_shapefile):
 
         # Ensure CRS matches
         if gdf.crs != clip_gdf.crs:
-            logging.info(
+            logger.info(
                 "Reprojecting GeoDataFrame to match clipping shapefile CRS.")
             gdf = gdf.to_crs(clip_gdf.crs)
 
@@ -186,7 +190,7 @@ def clip_vector_to_extent(gdf, clip_shapefile):
         if clipped_gdf.empty:
             log_error_and_raise("No features found after clipping operation.")
 
-        logging.info(
+        logger.info(
             f"Clipped GeoDataFrame contains {len(clipped_gdf)} features.")
 
         return clipped_gdf
@@ -211,9 +215,9 @@ def save_vector_file(gdf, output_path):
     None
     """
     try:
-        logging.info(f"Saving GeoDataFrame to file: {output_path}")
+        logger.info(f"Saving GeoDataFrame to file: {output_path}")
         gdf.to_file(output_path, driver="ESRI Shapefile")
-        logging.info("GeoDataFrame saved successfully.")
+        logger.info("GeoDataFrame saved successfully.")
     except Exception as e:
         log_error_and_raise(f"Error saving GeoDataFrame to file: {e}")
 
@@ -291,7 +295,7 @@ def reproject_raster(input_raster, target_srs, x_res=10, y_res=10, resample_alg=
         If the reprojection fails.
     """
     try:
-        logging.info(
+        logger.info(
             f"Reprojecting raster: {input_raster} to {target_srs} with resolution {x_res}x{y_res}")
         reprojected = gdal.Warp(
             '', input_raster, dstSRS=target_srs, format="MEM",
@@ -328,10 +332,10 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
         If any step in the process fails.
     """
     try:
-        logging.info("Creating forest mask...")
+        logger.info("Creating forest mask...")
 
         # Step 1: Reproject the reference raster to get the desired properties
-        logging.info("Reprojecting reference raster to EPSG:2154...")
+        logger.info("Reprojecting reference raster to EPSG:2154...")
         ref_raster_reprojected = reproject_raster(
             reference_raster, "EPSG:2154")
         pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs = get_raster_properties(
@@ -351,7 +355,7 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
         y_pixels = int((ymax_aligned - ymin_aligned) / pixel_height)
 
         # Step 2: Create an in-memory raster to rasterize the vector mask
-        logging.info("Rasterizing forest mask...")
+        logger.info("Rasterizing forest mask...")
         mem_driver = gdal.GetDriverByName('MEM')
         out_raster = mem_driver.Create(
             '', x_pixels, y_pixels, 1, gdal.GDT_Byte)
@@ -379,7 +383,7 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
         vector_ds = None
 
         # Step 3: Clip the rasterized mask to the study area
-        logging.info("Clipping the forest mask to the study area...")
+        logger.info("Clipping the forest mask to the study area...")
         clipped_mask = clip_raster_to_extent(
             out_raster, clip_vector, nodata_value=99)
 
@@ -391,7 +395,7 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
         if os.path.exists(output_path):
             try:
                 os.remove(output_path)
-                logging.info(f"Removed existing file: {output_path}")
+                logger.info(f"Removed existing file: {output_path}")
             except PermissionError:
                 log_error_and_raise(
                     f"Failed to remove existing file: {output_path}")
@@ -411,7 +415,7 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
         out_raster = None
         clipped_mask = None
 
-        logging.info(f"Forest mask saved to: {output_path}")
+        logger.info(f"Forest mask saved to: {output_path}")
 
     except Exception as e:
         log_error_and_raise(f"Error during forest mask creation: {e}")
@@ -441,7 +445,7 @@ def clip_raster_to_extent(input_raster, clip_vector, nodata_value):
         If the clipping process fails.
     """
     try:
-        logging.info(f"Clipping raster with shapefile: {clip_vector}")
+        logger.info(f"Clipping raster with shapefile: {clip_vector}")
         if not os.path.exists(clip_vector):
             log_error_and_raise(
                 f"Shapefile not found: {clip_vector}", FileNotFoundError)
@@ -480,7 +484,7 @@ def resample_raster(input_raster, pixel_size):
         Resampled raster in memory.
     """
     try:
-        logging.info(f"Resampling raster to pixel size: {pixel_size}")
+        logger.info(f"Resampling raster to pixel size: {pixel_size}")
         resampled = gdal.Warp('', input_raster, format="MEM",
                               xRes=pixel_size, yRes=pixel_size, resampleAlg="bilinear")
         if resampled is None:
@@ -514,7 +518,7 @@ def apply_mask(input_raster, mask_raster_path, nodata_value):
         If the masking process fails.
     """
     try:
-        logging.info("Applying mask to raster...")
+        logger.info("Applying mask to raster...")
 
         # Open the mask raster
         mask_ds = gdal.Open(mask_raster_path)
@@ -580,7 +584,7 @@ def calculate_ndvi_from_processed_bands(red_raster, nir_raster, nodata_value=-99
         If any step in the process fails.
     """
     try:
-        logging.info("Calculating NDVI from processed bands...")
+        logger.info("Calculating NDVI from processed bands...")
 
         # Ensure the rasters have the same dimensions
         if (red_raster.RasterXSize != nir_raster.RasterXSize) or (red_raster.RasterYSize != nir_raster.RasterYSize):
@@ -651,7 +655,7 @@ def merge_rasters(raster_list, output_path, band_names, pixel_type, compression=
     None
     """
     try:
-        logging.info("Merging rasters into a single multiband raster...")
+        logger.info("Merging rasters into a single multiband raster...")
 
         # Build VRT (Virtual Dataset)
         vrt_options = gdal.BuildVRTOptions(
@@ -681,7 +685,7 @@ def merge_rasters(raster_list, output_path, band_names, pixel_type, compression=
         for ds in raster_list:
             ds = None
 
-        logging.info(f"Multiband raster saved to: {output_path}")
+        logger.info(f"Multiband raster saved to: {output_path}")
 
     except Exception as e:
         log_error_and_raise(f"Error during merging rasters: {e}")
