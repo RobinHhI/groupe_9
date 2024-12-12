@@ -36,5 +36,5 @@ PROJET_TELEDETECTION/
 │   ├── scripts/
 │   │   ├── build_mask.py
 │   │   └── ...
-│   ├── arborescence.txt
-|   └── .gitignore
+├── arborescence.txt
+└── .gitignore
