@@ -1,5 +1,20 @@
+# Logs et environnements
+*.log
+.env
+__pycache__/
+venv/
+
+
+# Type des fichiers
 *.tiff
 *.tif
 *.xml
 *.tif.aux.xml
 *.pyc
+
+# Ignorer fichiers temporaires
+temp_*.shp
+temp_*.shx
+temp_*.dbf
+temp_*.prj
+temp_*.cpg

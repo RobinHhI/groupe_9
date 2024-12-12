@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 # ================================= #
-# === FONCTION POUR LE LOGGER ===== #
+# ===  FONCTIONS UTILITAIRES  ===== #
 # ================================= #
 
 def log_error_and_raise(message, exception=RuntimeError):
@@ -52,6 +52,30 @@ def log_error_and_raise(message, exception=RuntimeError):
     """
     logger.error(f"{message}\n{traceback.format_exc()}")
     raise exception(message)
+
+
+def cleanup_temp_files(*base_file_paths):
+    """
+    Supprime les fichiers temporaires spécifiés avec toutes leurs extensions associées.
+
+    Paramètres :
+    -----------
+    *base_file_paths : str
+        Chemins de base des fichiers à supprimer (sans extension spécifique).
+        Ex : "temp_classes_dissolues" supprimera tous les fichiers "temp_classes_dissolues.*".
+    """
+    extensions = [".shp", ".shx", ".dbf", ".prj",
+                  ".cpg", ".qpj", ".fix", ".shp.xml"]
+    for base_path in base_file_paths:
+        for ext in extensions:
+            file_path = f"{base_path}{ext}"
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Fichier temporaire supprimé : {file_path}")
+            except Exception as e:
+                logger.error(
+                    f"Erreur lors de la suppression du fichier {file_path} : {e}")
 
 
 # ================================== #
@@ -807,7 +831,7 @@ def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path, groupes):
         gdf_classes = gdf.dissolve(by='Nom')
         gdf_classes['ClassID'] = range(1, len(gdf_classes) + 1)
 
-        temp_class_shp = "classes_dissolues.shp"
+        temp_class_shp = "temp_classes_dissolues.shp"
         gdf_classes.to_file(temp_class_shp)
 
         src = gdal.Open(raster_path)
@@ -883,7 +907,7 @@ def extraire_valeurs_ndvi_par_polygone(shapefile_path, raster_path, groupes):
         if 'PolyIntID' not in gdf.columns:
             gdf['PolyIntID'] = range(1, len(gdf) + 1)
 
-        temp_poly_shp = "polygones_int_id.shp"
+        temp_poly_shp = "temp_polygones_int_id.shp"
         gdf.to_file(temp_poly_shp)
 
         src = gdal.Open(raster_path)

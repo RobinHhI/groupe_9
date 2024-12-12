@@ -12,7 +12,7 @@ import geopandas as gpd
 import os  # Pour gérer les chemins et la création des répertoires
 
 # Importation des fonctions personnalisées
-from my_function import filter_and_reclassify, save_vector_file, clip_vector_to_extent
+from my_function import filter_and_reclassify, clip_vector_to_extent, save_vector_file
 
 # Définition des chemins des fichiers
 shp_path = "data/project/FORMATION_VEGETALE.shp"
@@ -29,17 +29,17 @@ if not os.path.exists(output_dir):
 print("Chargement des données depuis :", shp_path)
 bd_foret = gpd.read_file(shp_path)
 
-# Filtrage et reclassification des données
-print("Filtrage et reclassification des données...")
-bd_foret_filtered = filter_and_reclassify(bd_foret)
-
 # Découpage des données à l'emprise de l'étude
 print("Découpage des données à l'emprise de l'étude...")
-bd_foret_clipped = clip_vector_to_extent(bd_foret_filtered, clip_shapefile)
+bd_foret_clipped = clip_vector_to_extent(bd_foret, clip_shapefile)
+
+# Filtrage et reclassification des données
+print("Filtrage et reclassification des données...")
+bd_foret_filtered = filter_and_reclassify(bd_foret_clipped)
 
 # Sauvegarde du fichier final
 print("Sauvegarde des données filtrées, reclassifiées et découpées dans :", output_path)
-save_vector_file(bd_foret_clipped, output_path)
+save_vector_file(bd_foret_filtered, output_path)
 
 # Confirmation de la fin de l'exécution
 print("Traitement terminé avec succès. Le fichier a été sauvegardé dans :", output_path)

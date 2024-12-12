@@ -9,10 +9,10 @@ from my_function import (extraire_valeurs_ndvi_par_classe,
                          calculer_centroide_et_distances,
                          plot_barchart_distance_classes,
                          plot_violin_distance_polygons,
+                         cleanup_temp_files,
                          log_error_and_raise)
 import os
 import time
-
 
 # Définition des chemins d'entrée et de sortie
 shapefile_path = "groupe_9/results/data/sample/Sample_BD_foret_T31TCJ.shp"
@@ -32,7 +32,9 @@ groupes = {
     "Mélange de feuillus préponderants conifères": "Mélange"
 }
 
-os.makedirs(output_folder, exist_ok=True)
+# Chemin des fichiers temporaires
+temp_class_shp = "temp_classes_dissolues"
+temp_poly_shp = "temp_polygones_int_id"
 
 try:
     total_start_time = time.time()
@@ -123,3 +125,8 @@ try:
 
 except Exception as e:
     log_error_and_raise(f"Une erreur est survenue lors de l'analyse : {e}")
+
+finally:
+    # Supprimer les fichiers temporaires
+    cleanup_temp_files("temp_classes_dissolues", "temp_polygones_int_id")
+    print("Fichiers temporaires supprimés.")
