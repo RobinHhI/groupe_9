@@ -10,10 +10,13 @@ Il produit des subplots de séries temporelles de NDVI pour les classes indiqué
 Créé le 6 décembre 2024
 """
 
-from my_function_robin import analyse_ndvi_par_classe
+from my_function_robin import process_ndvi
 
 
-raster_file = "groupe_9/results/data/img_pretraitees/Serie_temp_S2_ndvi.tif"
-shapefile = "groupe_9/results/data/sample/Sample_BD_foret_T31TCJ.shp"
-classes_selection = ["Chêne", "Robinier", "Peupleraie", "Douglas", "Pin laricio ou pin noir", "Pin maritime"]
-stats = analyse_ndvi_par_classe(raster_file, shapefile, classes_selection, nom_champ="Nom", output_plot="groupe_9/results/figure/temp_mean_ndvi.png")
+raster_path = "groupe_9/results/data/img_pretraitees/Serie_temp_S2_ndvi.tif"
+shapefile_path = "groupe_9/results/data/sample/Sample_BD_foret_T31TCJ.shp"
+classes_interet = ["Chêne", "Robinier", "Peupleraie", "Douglas", "Pin laricio ou pin noir", "Pin maritime"]
+output_dir = "groupe_9/results/figure"
+
+stats = process_ndvi(raster_path, shapefile_path, classes_interet, 
+                            output_plot_path="groupe_9/results/figure/temp_mean_ndvi.png")
