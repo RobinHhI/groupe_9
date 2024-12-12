@@ -20,7 +20,7 @@ Modifications récentes :
 - Adaptation des fonctions de calcul de distances pour travailler avec des données 2D.
 """
 
-import os
+
 import logging
 import sys
 import traceback
@@ -28,9 +28,11 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from osgeo import gdal, ogr, osr
-from affine import Affine
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D  # Créer des lignes dans la légende
 
+# GDAL configuration
+gdal.UseExceptions()
 
 # Configuration du logger
 logging.basicConfig(
@@ -56,26 +58,10 @@ def log_error_and_raise(message, exception=RuntimeError):
     raise exception(message)
 
 
-def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path):
+def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path, groupes):
     """
     Extrait les valeurs NDVI pour chaque classe au niveau du pixel, 
-    en utilisant la rasterisation du shapefile dissous par classe.
-
-    Paramètres :
-    -----------
-    shapefile_path : str
-        Chemin vers le fichier shapefile contenant les polygones et la colonne 'Nom' pour la classe.
-    raster_path : str
-        Chemin vers le raster NDVI multi-bandes (GeoTIFF).
-
-    Retourne :
-    ---------
-    dict
-        Un dictionnaire avec, pour chaque classe :
-        {
-          "total_pixels": int,
-          "ndvi_means": array (N_pixels, N_bandes)
-        }
+    mais seulement pour les classes présentes dans le dictionnaire 'groupes'.
     """
     try:
         logger.info(
@@ -85,18 +71,21 @@ def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path):
             log_error_and_raise(
                 "La colonne 'Nom' est requise dans le shapefile.")
 
+        # Filtrer uniquement les classes présentes dans 'groupes'
+        classes_valide = set(groupes.keys())
+        gdf = gdf[gdf['Nom'].isin(classes_valide)]
+        if gdf.empty:
+            log_error_and_raise(
+                "Aucune classe dans le shapefile ne correspond aux classes du dictionnaire 'groupes'.")
+
         # Dissoudre par classe
         logger.info("Dissolution des polygones par classe...")
         gdf_classes = gdf.dissolve(by='Nom')
-        # Ajouter un ID pour chaque classe
-        # range(1, len(gdf_classes)+1) assigne un ID unique par ligne
-        gdf_classes['ClassID'] = range(1, len(gdf_classes)+1)
+        gdf_classes['ClassID'] = range(1, len(gdf_classes) + 1)
 
-        # Sauvegarder temporairement le shapefile dissous
         temp_class_shp = "classes_dissolues.shp"
         gdf_classes.to_file(temp_class_shp)
 
-        # Ouvrir le raster NDVI avec GDAL
         src = gdal.Open(raster_path)
         if src is None:
             log_error_and_raise("Impossible d'ouvrir le raster NDVI.")
@@ -107,7 +96,6 @@ def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path):
         ysize = src.RasterYSize
         n_bandes = src.RasterCount
 
-        # Créer un raster en mémoire pour les classes
         logger.info("Rasterisation des classes...")
         driver = gdal.GetDriverByName('MEM')
         class_raster = driver.Create('', xsize, ysize, 1, gdal.GDT_Int16)
@@ -118,30 +106,23 @@ def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path):
         band.Fill(0)  # 0 = aucune classe
         band.SetNoDataValue(0)
 
-        # Ouvrir le shapefile dissous avec OGR
         ds = ogr.Open(temp_class_shp)
         layer = ds.GetLayer()
 
-        # Rasteriser avec l'attribut ClassID
         gdal.RasterizeLayer(class_raster, [1], layer, options=[
                             "ATTRIBUTE=ClassID"])
 
-        # Lire tout le NDVI
         logger.info("Lecture de toutes les bandes NDVI...")
-        ndvi_data = src.ReadAsArray()  # (n_bandes, hauteur, largeur)
+        ndvi_data = src.ReadAsArray()
 
-        # (hauteur, largeur) avec les IDs de classe
         class_arr = class_raster.ReadAsArray()
 
         resultats_par_classe = {}
-        # Pour chaque classe dans gdf_classes
         for idx, row in gdf_classes.iterrows():
             classe = str(idx)  # idx est la classe (Nom)
             class_id = row['ClassID']
-            # Créer un masque pour cette classe
             mask_classe = (class_arr == class_id)
-            # Extraire les pixels NDVI
-            pixels_classe = ndvi_data[:, mask_classe].T  # (N_pixels, n_bandes)
+            pixels_classe = ndvi_data[:, mask_classe].T
             total_pixels = pixels_classe.shape[0]
             resultats_par_classe[classe] = {
                 "total_pixels": total_pixels,
@@ -156,50 +137,31 @@ def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path):
             f"Erreur lors de l'extraction des valeurs NDVI par classe : {e}")
 
 
-def extraire_valeurs_ndvi_par_polygone(shapefile_path, raster_path):
+def extraire_valeurs_ndvi_par_polygone(shapefile_path, raster_path, groupes):
     """
-    Extrait les valeurs NDVI pour chaque polygone au niveau du pixel
-    en rasterisant le shapefile avec un ID unique par polygone.
-
-    Paramètres :
-    -----------
-    shapefile_path : str
-        Chemin vers le fichier shapefile contenant les polygones, 
-        avec une colonne 'ID' (entier unique) et 'Nom' pour la classe.
-    raster_path : str
-        Chemin vers le raster NDVI multi-bandes (GeoTIFF).
-
-    Retourne :
-    ---------
-    dict
-        {
-           poly_id: {
-               "ndvi_means": array (N_pixels_poly, N_bandes),
-               "total_pixels": int,
-               "class": str
-           },
-           ...
-        }
+    Extrait les valeurs NDVI pour chaque polygone, uniquement pour les classes présentes dans 'groupes'.
     """
     try:
         logger.info(
             "Chargement du shapefile et du raster NDVI pour extraction par polygone...")
         gdf = gpd.read_file(shapefile_path)
-        if 'ID' not in gdf.columns:
-            log_error_and_raise(
-                "La colonne 'ID' est requise dans le shapefile.")
         if 'Nom' not in gdf.columns:
             log_error_and_raise(
                 "La colonne 'Nom' est requise dans le shapefile.")
 
-        # Assurer que ID est un entier
-        # gdf['ID'] = gdf['ID'].astype(int)  # si nécessaire
+        # Filtrer les classes
+        classes_valide = set(groupes.keys())
+        gdf = gdf[gdf['Nom'].isin(classes_valide)]
+        if gdf.empty:
+            log_error_and_raise(
+                "Aucune classe dans le shapefile ne correspond aux classes du dictionnaire 'groupes'.")
 
-        # Sauvegarder (si nécessaire) pour OGR
-        temp_poly_shp = "polygones.shp"
+        if 'PolyIntID' not in gdf.columns:
+            gdf['PolyIntID'] = range(1, len(gdf) + 1)
+
+        temp_poly_shp = "polygones_int_id.shp"
         gdf.to_file(temp_poly_shp)
 
-        # Ouvrir le raster NDVI avec GDAL
         src = gdal.Open(raster_path)
         if src is None:
             log_error_and_raise("Impossible d'ouvrir le raster NDVI.")
@@ -210,7 +172,6 @@ def extraire_valeurs_ndvi_par_polygone(shapefile_path, raster_path):
         ysize = src.RasterYSize
         n_bandes = src.RasterCount
 
-        # Créer un raster en mémoire pour les polygones
         logger.info("Rasterisation des polygones...")
         driver = gdal.GetDriverByName('MEM')
         poly_raster = driver.Create('', xsize, ysize, 1, gdal.GDT_Int32)
@@ -218,36 +179,34 @@ def extraire_valeurs_ndvi_par_polygone(shapefile_path, raster_path):
         poly_raster.SetProjection(projection)
 
         band = poly_raster.GetRasterBand(1)
-        band.Fill(0)  # 0 = aucun polygone
+        band.Fill(0)
         band.SetNoDataValue(0)
 
         ds = ogr.Open(temp_poly_shp)
         layer = ds.GetLayer()
 
-        # Rasteriser avec l'attribut 'ID'
-        gdal.RasterizeLayer(poly_raster, [1], layer, options=["ATTRIBUTE=ID"])
+        gdal.RasterizeLayer(poly_raster, [1], layer, options=[
+                            "ATTRIBUTE=PolyIntID"])
 
-        # Lire tout le NDVI
         logger.info("Lecture de toutes les bandes NDVI...")
-        ndvi_data = src.ReadAsArray()  # (n_bandes, hauteur, largeur)
+        ndvi_data = src.ReadAsArray()
 
-        poly_arr = poly_raster.ReadAsArray()  # (hauteur, largeur) avec l'ID du polygone
+        poly_arr = poly_raster.ReadAsArray()
 
         resultats_par_polygone = {}
-        # Maintenant, on a un ID par pixel (ou 0 si rien)
-        # On va itérer sur les polygones du gdf original pour extraire les pixels
         for i, row in gdf.iterrows():
-            poly_id = row['ID']
+            poly_int_id = row['PolyIntID']
             poly_class = row['Nom']
-            # Masque pour ce polygone
-            mask_poly = (poly_arr == poly_id)
-            pixels_poly = ndvi_data[:, mask_poly].T  # (N_pixels, n_bandes)
+            original_id = row['ID'] if 'ID' in gdf.columns else None
+            mask_poly = (poly_arr == poly_int_id)
+            pixels_poly = ndvi_data[:, mask_poly].T
             total_pixels = pixels_poly.shape[0]
 
-            resultats_par_polygone[poly_id] = {
+            resultats_par_polygone[poly_int_id] = {
                 "ndvi_means": pixels_poly,
                 "total_pixels": total_pixels,
-                "class": poly_class
+                "class": poly_class,
+                "original_id": original_id
             }
 
         logger.info("Extraction des valeurs NDVI par polygone terminée.")
@@ -287,9 +246,6 @@ def calculer_centroide_et_distances(valeurs_ndvi, niveau="classe", classes=None)
         Si pas de NDVI, distance_moyenne et centroide = None.
     """
     try:
-        logger.info(
-            f"Calcul du centroïde et distances moyennes au niveau : {niveau}")
-
         resultats = {}
 
         for cle, valeurs in valeurs_ndvi.items():
@@ -326,7 +282,6 @@ def calculer_centroide_et_distances(valeurs_ndvi, niveau="classe", classes=None)
                 "classe": classe_associee
             }
 
-        logger.info("Calcul du centroïde et distances terminé avec succès.")
         return resultats
 
     except Exception as e:
@@ -382,9 +337,10 @@ def plot_barchart_distance_classes(distances_par_classe, output_path, groupes):
     ax.set_ylim(0, max(distances) * 1.2)
 
     # Ajout d'une légende
-    legend_handles = [plt.Rectangle((0, 0), 1, 1, color='#FF9999', edgecolor="black", label="Pur"),
-                      plt.Rectangle((0, 0), 1, 1, color='#66B3FF', edgecolor="black", label="Mélange")]
-    ax.legend(handles=legend_handles, title="Groupes", loc="upper right")
+    legend_handles = [plt.Rectangle((0, 0), 1, 1, facecolor='#FF9999', edgecolor="black", label="Pur"),
+                      plt.Rectangle((0, 0), 1, 1, facecolor='#66B3FF', edgecolor="black", label="Mélange")]
+
+    ax.legend(handles=legend_handles, title="Essences", loc="upper right")
 
     # Amélioration de l'affichage
     plt.grid(axis='y', linestyle='--', alpha=0.5)
@@ -396,49 +352,96 @@ def plot_barchart_distance_classes(distances_par_classe, output_path, groupes):
     logger.info(f"Graphique sauvegardé : {output_path}")
 
 
-def plot_violin_distance_polygons(distances_par_polygone, classes, output_path, groupes):
+def plot_violin_distance_polygons(distances_par_polygone, classes_polygones, output_path, groupes):
     """
-    Génère un violin plot des distances moyennes au centrôide pour chaque polygone,
-    séparant les groupes "Pur" et "Mélange".
+    Génère un violin plot des distances moyennes au centrôide par classe, à l'échelle des polygones.
+    Les classes pures (Pur) sont affichées en premier (en rouge), et les classes mélange (Mélange) en second (en bleu).
+    Un violon par classe.
 
     Paramètres :
     -----------
-    distances_par_polygone : list
+    distances_par_polygone : list of float
         Liste des distances moyennes au centrôide pour chaque polygone.
-    classes : list
-        Liste des classes associées à chaque polygone (même ordre que distances_par_polygone).
+    classes_polygones : list of str
+        Liste des classes associées à chaque polygone, dans le même ordre que distances_par_polygone.
     output_path : str
         Chemin pour sauvegarder l'image.
     groupes : dict
         Dictionnaire associant chaque classe à "Pur" ou "Mélange".
+
+    Note :
+    Cette fonction suit la même logique de tri que le bar plot : d'abord les classes "Pur" puis "Mélange",
+    classées alphabétiquement dans chaque groupe.
     """
-    # Associer distances aux groupes
-    data_pur = [dist for dist, classe in zip(
-        distances_par_polygone, classes) if groupes.get(classe) == "Pur"]
-    data_melange = [dist for dist, classe in zip(
-        distances_par_polygone, classes) if groupes.get(classe) == "Mélange"]
 
-    # Création du graphique
-    fig, ax = plt.subplots(figsize=(8, 6))
-    parts = ax.violinplot([data_pur, data_melange],
-                          showmeans=True, showmedians=True)
+    plt.style.use('ggplot')
 
-    # Personnalisation des couleurs
-    colors = ['red', 'blue']
-    for i, pc in enumerate(parts['bodies']):
-        pc.set_facecolor(colors[i])
+    # Agréger les distances par classe
+    distances_par_classe = {}
+    for dist, cls in zip(distances_par_polygone, classes_polygones):
+        if cls not in distances_par_classe:
+            distances_par_classe[cls] = []
+        distances_par_classe[cls].append(dist)
+
+    # Déterminer le groupe (Pur/Mélange) de chaque classe
+    classes_data = [(cls, np.median(distances_par_classe[cls]), groupes.get(cls, "Autre"))
+                    for cls in distances_par_classe]
+
+    # Trier les données : Pur d'abord, puis Mélange, puis Autre (si existe), par ordre alphabétique dans chaque groupe
+    classes_data_sorted = sorted(
+        classes_data, key=lambda x: (x[2] != "Pur", x[0]))
+
+    # Extraire la liste des classes triées et des données correspondantes
+    classes_ordre = [item[0] for item in classes_data_sorted]
+    data = [distances_par_classe[cls] for cls in classes_ordre]
+    groupes_ordre = [groupes.get(cls, "Autre") for cls in classes_ordre]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Création du violon plot par classe
+    violin_parts = ax.violinplot(
+        data, showmeans=True, showmedians=True, showextrema=True)
+
+    # Appliquer les couleurs en fonction du groupe
+    # Pur (rouge), Mélange (bleu)
+    for i, pc in enumerate(violin_parts['bodies']):
+        if groupes_ordre[i] == "Pur":
+            pc.set_facecolor('#FF9999')
+        else:
+            pc.set_facecolor('#66B3FF')
         pc.set_edgecolor('black')
         pc.set_alpha(0.7)
 
-    # Ajout des étiquettes
-    ax.set_xticks([1, 2])
-    ax.set_xticklabels(["Pur", "Mélange"])
-    ax.set_title("Distribution des distances moyennes par polygone",
-                 fontsize=14, fontweight="bold")
-    ax.set_ylabel("Distance moyenne au centrôide", fontsize=12)
-    ax.grid(axis='y', linestyle='--', alpha=0.5)
+    # Personnalisation des lignes (médianes, extrêmes, etc.)
+    for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
+        vp = violin_parts[partname]
+        vp.set_edgecolor('black')  # Couleur noire pour les lignes principales
+        vp.set_linewidth(1)
 
+    # Personnalisation des axes et du titre
+    ax.set_xticks(range(1, len(classes_ordre) + 1))
+    ax.set_xticklabels(classes_ordre, fontsize=9, rotation=45, ha='right')
+    ax.set_ylabel("Distance moyenne au centrôide", fontsize=12)
+    ax.set_title("Distribution des distances moyennes par polygone, par classe",
+                 fontsize=14, fontweight="bold")
+
+    # Légende
+    legend_handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor='#FF9999',
+                      edgecolor='black', label="Pur"),  # Classes pures
+        plt.Rectangle((0, 0), 1, 1, facecolor='#66B3FF',
+                      edgecolor='black', label="Mélange"),  # Classes mélanges
+        Line2D([0], [0], color='red', linestyle='-',
+               linewidth=1, label="Médiane")  # Line rouge
+    ]
+
+    fig.subplots_adjust(right=0.8)  # Réserver un espace pour la légende
+    ax.legend(handles=legend_handles, title="Essences",
+              loc="upper right", bbox_to_anchor=(1.13, 1.015))
+
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
     plt.tight_layout()
+
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
     logger.info(f"Graphique sauvegardé : {output_path}")

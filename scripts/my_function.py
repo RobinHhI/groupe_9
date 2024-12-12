@@ -16,58 +16,68 @@ import logging
 import sys
 import traceback
 import numpy as np
-from osgeo import gdal
+import pandas as pd
+from osgeo import gdal, ogr, osr
 import geopandas as gpd
-from rasterstats import zonal_stats
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D  # Créer des lignes dans la légende
 
-# GDAL configuration
+# Configuration GDAL
 gdal.UseExceptions()
 
-# logger configuration
+# Configuration logger
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-# Using the logger
+# Création de la variable logger
 logger = logging.getLogger(__name__)
 
-# =========================== #
-# === UTILITY FUNCTIONS ===== #
-# =========================== #
 
+# ================================= #
+# === FONCTION POUR LE LOGGER ===== #
+# ================================= #
 
 def log_error_and_raise(message, exception=RuntimeError):
     """
-    Logs an error message, includes traceback, and raises an exception.
+    Enregistre un message d'erreur, inclut la trace d'exécution, et déclenche une exception.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     message : str
-        Error message to log and raise.
+        Message d'erreur à enregistrer et à lever.
     exception : Exception
-        Type of exception to raise (default: RuntimeError).
+        Type d'exception à lever (par défaut : RuntimeError).
     """
     logger.error(f"{message}\n{traceback.format_exc()}")
     raise exception(message)
 
+
 # ================================== #
-# === RECLASSIFICATION BD FÔRET ==== #
+# === FONCTIONS POUR LE VECTEUR ==== #
 # ================================== #
+"""
+Fonctions pour le traitement vectoriel de la BD Forêt
+
+Ces fonctions permettent de filtrer et reclasser les données vectorielles, 
+découper un GeoDataFrame selon une emprise donnée, 
+et enregistrer les résultats dans un fichier pour une analyse ultérieure.
+"""
 
 
 def reclassification_dictionary():
     """
-    Return the reclassification dictionary for BD Forêt.
+    Retourne le dictionnaire de reclassement pour BD Forêt.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     dict
-        A dictionary mapping the `TFV` field to a tuple with:
-        - `Code` (int): The classification code.
-        - `Nom` (str): The classification name.
+        Un dictionnaire associant le champ `TFV` à un tuple contenant :
+        - `Code` (int) : Le code de classification.
+        - `Nom` (str) : Le nom de la classification.
     """
+
     return {
         "Forêt fermée d’un autre feuillu pur": (11, "Autres feuillus"),
         "Forêt fermée de châtaignier pur": (11, "Autres feuillus"),
@@ -102,262 +112,298 @@ def reclassification_dictionary():
 
 def filter_and_reclassify(gdf):
     """
-    Filter and reclassify a GeoDataFrame based on the BD Forêt system.
+    Filtre et reclasse un GeoDataFrame en fonction du système BD Forêt.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     gdf : GeoDataFrame
-        Input GeoDataFrame containing the BD Forêt data.
+        GeoDataFrame en entrée contenant les données BD Forêt.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     GeoDataFrame
-        A filtered and reclassified GeoDataFrame with existing attributes plus `Nom` and `Code`.
+        Un GeoDataFrame filtré et reclassé avec les attributs existants, ainsi que `Nom` et `Code`.
     """
     try:
-        logger.info("Starting filter and reclassification of GeoDataFrame.")
+        logger.info("Début du filtrage et du reclassement du GeoDataFrame.")
 
-        # Get the reclassification dictionary
+        # Obtenir le dictionnaire de reclassement
         reclassification = reclassification_dictionary()
 
-        # Filter based on the categories in the dictionary
+        # Filtrer en fonction des catégories dans le dictionnaire
         categories_to_keep = list(reclassification.keys())
         filtered_gdf = gdf[gdf["TFV"].isin(categories_to_keep)].copy()
 
         if filtered_gdf.empty:
             log_error_and_raise(
-                "No features found after filtering based on TFV categories.")
+                "Aucune entité trouvée après filtrage basé sur les catégories TFV.")
 
         logger.info(
-            f"Filtered GeoDataFrame to {len(filtered_gdf)} features based on TFV categories.")
+            f"GeoDataFrame filtré avec {len(filtered_gdf)} entités basées sur les catégories TFV.")
 
-        # Add `Nom` and `Code` attributes based on the reclassification
+        # Ajouter les attributs `Nom` et `Code` en fonction du reclassement
         filtered_gdf["Nom"] = filtered_gdf["TFV"].map(
             lambda x: reclassification[x][1])
         filtered_gdf["Code"] = filtered_gdf["TFV"].map(
             lambda x: reclassification[x][0])
 
-        logger.info("Added 'Nom' and 'Code' attributes to GeoDataFrame.")
+        logger.info("Ajout des attributs 'Nom' et 'Code' au GeoDataFrame.")
 
         return filtered_gdf
 
     except Exception as e:
         log_error_and_raise(
-            f"Error during filtering and reclassification: {e}")
+            f"Erreur lors du filtrage et du reclassement : {e}")
 
 
-# ============================= #
-# === VECTOR FILE FUNCTIONS === #
-# ============================= #
 def clip_vector_to_extent(gdf, clip_shapefile):
     """
-    Clip a GeoDataFrame to the extent of a shapefile without adding attributes from the clipping shapefile.
+    Découpe un GeoDataFrame à l'étendue d'un shapefile sans ajouter les attributs du shapefile de découpage.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     gdf : GeoDataFrame
-        Input GeoDataFrame to clip.
+        GeoDataFrame d'entrée à découper.
     clip_shapefile : str
-        Path to the shapefile defining the clipping extent.
+        Chemin vers le shapefile définissant l'étendue de découpage.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     GeoDataFrame
-        Clipped GeoDataFrame with attributes only from the input GeoDataFrame.
+        GeoDataFrame découpé contenant uniquement les attributs du GeoDataFrame d'entrée.
 
-    Raises:
-    ------
+    Exceptions :
+    -----------
     RuntimeError
-        If the clipping process fails.
+        Si le processus de découpage échoue.
     """
     try:
         logger.info(
-            f"Clipping GeoDataFrame using shapefile: {clip_shapefile}")
+            f"Découpage du GeoDataFrame en utilisant le shapefile : {clip_shapefile}")
 
-        # Read the clipping shapefile
+        # Lire le shapefile de découpage
         clip_gdf = gpd.read_file(clip_shapefile)
         if clip_gdf.empty:
             log_error_and_raise(
-                f"Clipping shapefile {clip_shapefile} is empty.")
+                f"Le shapefile de découpage {clip_shapefile} est vide.")
 
-        # Ensure CRS matches
+        # Vérifier et harmoniser le CRS
         if gdf.crs != clip_gdf.crs:
             logger.info(
-                "Reprojecting GeoDataFrame to match clipping shapefile CRS.")
+                "Reprojection du GeoDataFrame pour correspondre au CRS du shapefile de découpage.")
             gdf = gdf.to_crs(clip_gdf.crs)
 
-        # Perform the clipping using geopandas.clip
+        # Découper en utilisant geopandas.clip
         clipped_gdf = gpd.clip(gdf, clip_gdf)
 
         if clipped_gdf.empty:
-            log_error_and_raise("No features found after clipping operation.")
+            log_error_and_raise(
+                "Aucune entité trouvée après l'opération de découpage.")
 
         logger.info(
-            f"Clipped GeoDataFrame contains {len(clipped_gdf)} features.")
+            f"Le GeoDataFrame découpé contient {len(clipped_gdf)} entités.")
 
         return clipped_gdf
 
     except Exception as e:
-        log_error_and_raise(f"Error during clipping GeoDataFrame: {e}")
+        log_error_and_raise(f"Erreur lors du découpage du GeoDataFrame : {e}")
 
 
 def save_vector_file(gdf, output_path):
     """
-    Save a GeoDataFrame to a vector file (e.g., Shapefile, GeoJSON).
+    Enregistre un GeoDataFrame dans un fichier vecteur (par exemple, Shapefile, GeoJSON).
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     gdf : GeoDataFrame
-        Input GeoDataFrame to save.
+        GeoDataFrame d'entrée à sauvegarder.
     output_path : str
-        Path to save the output file, including the filename and extension.
+        Chemin pour sauvegarder le fichier de sortie, y compris le nom du fichier et son extension.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     None
     """
     try:
-        logger.info(f"Saving GeoDataFrame to file: {output_path}")
+        logger.info(
+            f"Enregistrement du GeoDataFrame dans le fichier : {output_path}")
         gdf.to_file(output_path, driver="ESRI Shapefile")
-        logger.info("GeoDataFrame saved successfully.")
+        logger.info("GeoDataFrame enregistré avec succès.")
     except Exception as e:
-        log_error_and_raise(f"Error saving GeoDataFrame to file: {e}")
+        log_error_and_raise(
+            f"Erreur lors de l'enregistrement du GeoDataFrame dans le fichier : {e}")
 
 
-# =================================== #
-# === RASTER PROCESSING FUNCTIONS === #
-# =================================== #
+# ========================================= #
+# === FONCTIONS POUR LE PRÉ-TRAITEMENT  === #
+# ========================================= #
+"""
+Fonctions pour le Pré-Traitement des Rasters
+
+Ces fonctions permettent de récupérer les propriétés des rasters, reprojeter, 
+rasteriser des masques, découper et rééchantillonner les données, appliquer des masques,
+calculer le NDVI, fusionner des rasters en multibandes et gérer les fichiers raster.
+"""
+
+
+def find_raster_bands(folder_path, band_prefixes):
+    """
+    Trouve et filtre les bandes raster en fonction de préfixes.
+
+    Paramètres :
+    -----------
+    folder_path : str
+        Chemin du dossier contenant les fichiers raster.
+    band_prefixes : list
+        Liste des préfixes de bandes à filtrer (ex : ["FRE_B2", "FRE_B3", "FRE_B4", "FRE_B8"]).
+
+    Retourne :
+    ---------
+    list
+        Liste des chemins des fichiers raster filtrés se terminant par '.tif' et correspondant aux préfixes spécifiés.
+    """
+    raster_files = []
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            # Vérifie si le fichier se termine par '.tif'
+            if file.endswith('.tif'):
+                # Vérifie si le fichier contient l'un des préfixes spécifiés
+                if any(prefix in file for prefix in band_prefixes):
+                    raster_files.append(os.path.join(root, file))
+    return raster_files
+
 
 def get_raster_properties(dataset):
     """
-    Get raster properties from a GDAL dataset.
+    Récupère les propriétés d'un raster à partir d'un dataset GDAL.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     dataset : gdal.Dataset
-        Input GDAL dataset.
+        Dataset GDAL en entrée.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     tuple
-        Raster properties: (pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs).
+        Propriétés du raster : (largeur_pixel, hauteur_pixel, xmin, ymin, xmax, ymax, crs).
 
-    Raises:
-    ------
+    Exceptions :
+    -----------
     ValueError
-        If the dataset is None or the resolution does not match the expected 10m.
+        Si le dataset est None ou si la résolution ne correspond pas à 10m attendus.
     """
     if dataset is None:
         raise ValueError(
-            "Input dataset is None. Please verify the input raster.")
+            "Le dataset d'entrée est None. Veuillez vérifier le raster en entrée.")
 
     geotransform = dataset.GetGeoTransform()
     pixel_width = geotransform[1]
-    pixel_height = abs(geotransform[5])  # Ensure positive pixel height
+    pixel_height = abs(geotransform[5])  # Assure une hauteur de pixel positive
     xmin = geotransform[0]
     ymax = geotransform[3]
     xmax = xmin + (dataset.RasterXSize * pixel_width)
-    # Adjust for negative height
+    # Ajustement pour une hauteur négative
     ymin = ymax - (dataset.RasterYSize * pixel_height)
     crs = dataset.GetProjection()
 
-    # Validate resolution is approximately 10m
+    # Vérification si la résolution est environ 10m
     if not (abs(pixel_width - 10) < 1e-6 and abs(pixel_height - 10) < 1e-6):
         raise ValueError(
-            f"Raster resolution does not match 10m: ({pixel_width}, {pixel_height})")
+            f"La résolution du raster ne correspond pas à 10m : ({pixel_width}, {pixel_height})")
 
     return pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs
 
 
 def reproject_raster(input_raster, target_srs, x_res=10, y_res=10, resample_alg="bilinear"):
     """
-    Reproject a raster to a target CRS in memory with specified resolution.
+    Reprojette un raster vers un système de coordonnées cible en mémoire avec une résolution spécifiée.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     input_raster : str
-        Path to the input raster.
+        Chemin vers le raster en entrée.
     target_srs : str
-        Target spatial reference system (e.g., 'EPSG:2154').
-    x_res : float, optional
-        Desired pixel width (default: 10).
-    y_res : float, optional
-        Desired pixel height (default: 10).
-    resample_alg : str, optional
-        Resampling algorithm to use (default: "bilinear").
+        Système de référence spatial cible (ex : 'EPSG:2154').
+    x_res : float, optionnel
+        Largeur de pixel souhaitée (par défaut : 10).
+    y_res : float, optionnel
+        Hauteur de pixel souhaitée (par défaut : 10).
+    resample_alg : str, optionnel
+        Algorithme de rééchantillonnage à utiliser (par défaut : "bilinear").
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     gdal.Dataset
-        Reprojected raster in memory.
+        Raster reprojeté en mémoire.
 
-    Raises:
-    ------
+    Exceptions :
+    -----------
     RuntimeError
-        If the reprojection fails.
+        Si la reprojection échoue.
     """
     try:
         logger.info(
-            f"Reprojecting raster: {input_raster} to {target_srs} with resolution {x_res}x{y_res}")
+            f"Reprojection du raster : {input_raster} vers {target_srs} avec une résolution de {x_res}x{y_res}")
         reprojected = gdal.Warp(
             '', input_raster, dstSRS=target_srs, format="MEM",
             xRes=x_res, yRes=y_res, resampleAlg=resample_alg
         )
         if reprojected is None:
-            log_error_and_raise(f"Failed to reproject raster: {input_raster}")
+            log_error_and_raise(
+                f"Échec de la reprojection du raster : {input_raster}")
         return reprojected
     except Exception as e:
-        log_error_and_raise(f"Error during reprojection: {e}")
+        log_error_and_raise(f"Erreur pendant la reprojection : {e}")
 
 
 def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
     """
-    Create a forest mask raster aligned with a reference raster, with:
-        - 1 for forest
-        - 0 for non-forest
-        - 99 for NoData areas.
+    Crée un raster masque pour les forêts aligné avec un raster de référence, avec :
+        - 1 pour les zones forestières
+        - 0 pour les zones non-forestières
+        - 99 pour les zones sans données (NoData).
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     mask_vector : str
-        Path to the vector file representing forest areas.
+        Chemin vers le fichier vecteur représentant les zones forestières.
     reference_raster : str
-        Path to the reference raster.
+        Chemin vers le raster de référence.
     clip_vector : str
-        Path to the shapefile defining the study area extent.
+        Chemin vers le shapefile définissant l'étendue de la zone d'étude.
     output_path : str
-        Path to save the final forest mask raster.
+        Chemin pour sauvegarder le raster masque final.
 
-    Raises:
-    ------
+    Exceptions :
+    -----------
     RuntimeError
-        If any step in the process fails.
+        Si une étape du processus échoue.
     """
     try:
-        logger.info("Creating forest mask...")
+        logger.info("Création du masque forestier...")
 
-        # Step 1: Reproject the reference raster to get the desired properties
-        logger.info("Reprojecting reference raster to EPSG:2154...")
+        # Étape 1 : Reprojection du raster de référence pour obtenir les propriétés souhaitées
+        logger.info("Reprojection du raster de référence vers EPSG:2154...")
         ref_raster_reprojected = reproject_raster(
             reference_raster, "EPSG:2154")
         pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs = get_raster_properties(
             ref_raster_reprojected)
 
-        # Release the reference raster after extracting properties
+        # Libérer le raster reprojeté après extraction des propriétés
         ref_raster_reprojected = None
 
-        # Align bounds to match the resolution
+        # Alignement des bornes pour correspondre à la résolution
         xmin_aligned = xmin - (xmin % pixel_width)
         ymin_aligned = ymin - (ymin % pixel_height)
         xmax_aligned = xmax + (pixel_width - (xmax % pixel_width))
         ymax_aligned = ymax + (pixel_height - (ymax % pixel_height))
 
-        # Calculate the number of pixels in x and y directions
+        # Calcul du nombre de pixels en directions x et y
         x_pixels = int((xmax_aligned - xmin_aligned) / pixel_width)
         y_pixels = int((ymax_aligned - ymin_aligned) / pixel_height)
 
-        # Step 2: Create an in-memory raster to rasterize the vector mask
-        logger.info("Rasterizing forest mask...")
+        # Étape 2 : Création d'un raster en mémoire pour rasteriser le masque vecteur
+        logger.info("Rasterisation du masque forestier...")
         mem_driver = gdal.GetDriverByName('MEM')
         out_raster = mem_driver.Create(
             '', x_pixels, y_pixels, 1, gdal.GDT_Byte)
@@ -365,93 +411,95 @@ def create_forest_mask(mask_vector, reference_raster, clip_vector, output_path):
             (xmin_aligned, pixel_width, 0, ymax_aligned, 0, -pixel_height))
         out_raster.SetProjection(crs)
 
-        # Initialize raster with value 0 (non-forest)
-        out_band = out_raster.GetRasterBand(1)  # Bands are 1-indexed
+        # Initialiser le raster avec la valeur 0 (non-forêt)
+        # Les bandes sont indexées à partir de 1
+        out_band = out_raster.GetRasterBand(1)
         out_band.Fill(0)
         out_band.SetNoDataValue(99)
 
-        # Open the vector mask
+        # Ouvrir le masque vecteur
         vector_ds = gdal.OpenEx(mask_vector, gdal.OF_VECTOR)
         if vector_ds is None:
-            log_error_and_raise(f"Cannot open vector file: {mask_vector}")
+            log_error_and_raise(
+                f"Impossible d'ouvrir le fichier vecteur : {mask_vector}")
 
-        # Rasterize the vector mask onto the raster, burning value 1 (forest)
+        # Rasteriser le masque vecteur avec la valeur 1 (forêt)
         err = gdal.RasterizeLayer(
             out_raster, [1], vector_ds.GetLayer(), burn_values=[1])
         if err != 0:
-            log_error_and_raise("Rasterization failed.")
+            log_error_and_raise("Échec de la rasterisation.")
 
-        # Close the vector dataset
+        # Fermer le fichier vecteur
         vector_ds = None
 
-        # Step 3: Clip the rasterized mask to the study area
-        logger.info("Clipping the forest mask to the study area...")
+        # Étape 3 : Découpage du rasterisé avec la zone d'étude
+        logger.info("Découpage du masque forestier avec la zone d'étude...")
         clipped_mask = clip_raster_to_extent(
             out_raster, clip_vector, nodata_value=99)
 
         if clipped_mask is None:
-            log_error_and_raise("Failed to clip the forest mask.")
+            log_error_and_raise("Échec du découpage du masque forestier.")
 
-        # Step 4: Save the clipped mask to the output path
-        # Before saving, ensure any existing file is deleted
+        # Étape 4 : Sauvegarde du masque découpé
+        # Supprimer le fichier existant avant sauvegarde
         if os.path.exists(output_path):
             try:
                 os.remove(output_path)
-                logger.info(f"Removed existing file: {output_path}")
+                logger.info(f"Fichier existant supprimé : {output_path}")
             except PermissionError:
                 log_error_and_raise(
-                    f"Failed to remove existing file: {output_path}")
+                    f"Impossible de supprimer le fichier existant : {output_path}")
 
         driver = gdal.GetDriverByName('GTiff')
         output_ds = driver.CreateCopy(
             output_path, clipped_mask, options=["COMPRESS=LZW"])
         if output_ds is None:
             log_error_and_raise(
-                f"Failed to save the forest mask to: {output_path}")
+                f"Échec de la sauvegarde du masque forestier : {output_path}")
 
-        # Flush and close the output dataset
+        # Finaliser et fermer les datasets
         output_ds.FlushCache()
         output_ds = None
-
-        # Release datasets
         out_raster = None
         clipped_mask = None
 
-        logger.info(f"Forest mask saved to: {output_path}")
+        logger.info(f"Masque forestier sauvegardé : {output_path}")
 
     except Exception as e:
-        log_error_and_raise(f"Error during forest mask creation: {e}")
+        log_error_and_raise(
+            f"Erreur pendant la création du masque forestier : {e}")
 
 
 def clip_raster_to_extent(input_raster, clip_vector, nodata_value):
     """
-    Clip a raster to a shapefile's extent.
+    Découpe un raster selon l'étendue d'un shapefile.
 
-    Parameters:
-    ----------
-    input_raster : gdal.Dataset or str
-        Input raster in memory or file path.
+    Paramètres :
+    -----------
+    input_raster : gdal.Dataset ou str
+        Raster en mémoire ou chemin vers le fichier raster en entrée.
     clip_vector : str
-        Path to the shapefile for clipping.
-    nodata_value : int or float
-        NoData value to set in the output raster.
+        Chemin vers le shapefile utilisé pour le découpage.
+    nodata_value : int ou float
+        Valeur NoData à attribuer dans le raster de sortie.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     gdal.Dataset
-        Clipped raster in memory.
+        Raster découpé en mémoire.
 
-    Raises:
-    ------
+    Exceptions :
+    -----------
     RuntimeError
-        If the clipping process fails.
+        Si le processus de découpage échoue.
     """
     try:
-        logger.info(f"Clipping raster with shapefile: {clip_vector}")
+        logger.info(f"Découpage du raster avec le shapefile : {clip_vector}")
         if not os.path.exists(clip_vector):
             log_error_and_raise(
-                f"Shapefile not found: {clip_vector}", FileNotFoundError)
+                f"Shapefile introuvable : {clip_vector}", FileNotFoundError)
 
+        # Découpage avec GDAL.Warp
         clipped = gdal.Warp(
             '', input_raster, format="MEM",
             cutlineDSName=clip_vector, cropToCutline=True,
@@ -459,90 +507,99 @@ def clip_raster_to_extent(input_raster, clip_vector, nodata_value):
         )
         if clipped is None:
             log_error_and_raise(
-                f"Failed to clip raster with shapefile: {clip_vector}")
+                f"Échec du découpage du raster avec le shapefile : {clip_vector}")
 
-        # Release the input raster after clipping
+        # Libérer la mémoire si le raster en entrée est en mémoire
         if isinstance(input_raster, gdal.Dataset):
             input_raster = None
+
         return clipped
+
     except Exception as e:
-        log_error_and_raise(f"Error during clipping: {e}")
+        log_error_and_raise(f"Erreur lors du découpage : {e}")
 
 
 def resample_raster(input_raster, pixel_size):
     """
-    Resample a raster to a specific resolution.
+    Rééchantillonne un raster à une résolution spécifique.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     input_raster : gdal.Dataset
-        Input raster in memory.
+        Raster en mémoire.
     pixel_size : float
-        Desired pixel size.
+        Taille de pixel souhaitée.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     gdal.Dataset
-        Resampled raster in memory.
+        Raster rééchantillonné en mémoire.
+
+    Exceptions :
+    -----------
+    RuntimeError
+        Si le processus de rééchantillonnage échoue.
     """
     try:
-        logger.info(f"Resampling raster to pixel size: {pixel_size}")
+        logger.info(
+            f"Rééchantillonnage du raster à une taille de pixel : {pixel_size}")
         resampled = gdal.Warp('', input_raster, format="MEM",
                               xRes=pixel_size, yRes=pixel_size, resampleAlg="bilinear")
         if resampled is None:
-            log_error_and_raise("Failed to resample raster.")
+            log_error_and_raise("Échec du rééchantillonnage du raster.")
         return resampled
     except Exception as e:
-        log_error_and_raise(f"Error during resampling: {e}")
+        log_error_and_raise(f"Erreur lors du rééchantillonnage : {e}")
 
 
 def apply_mask(input_raster, mask_raster_path, nodata_value):
     """
-    Apply a raster mask to a raster, setting non-forest areas to the NoData value.
+    Applique un masque raster à un raster, en définissant les zones non forestières à la valeur NoData.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     input_raster : gdal.Dataset
-        Input raster in memory.
+        Raster d'entrée en mémoire.
     mask_raster_path : str
-        Path to the mask raster file.
-    nodata_value : int or float
-        Value for NoData areas (non-forest and invalid data).
+        Chemin vers le fichier raster du masque.
+    nodata_value : int ou float
+        Valeur pour les zones NoData (non-forest et données invalides).
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     gdal.Dataset
-        Masked raster in memory.
+        Raster masqué en mémoire.
 
-    Raises:
-    ------
+    Exceptions :
+    -----------
     RuntimeError
-        If the masking process fails.
+        Si le processus d'application du masque échoue.
     """
     try:
-        logger.info("Applying mask to raster...")
+        logger.info("Application du masque au raster...")
 
-        # Open the mask raster
+        # Ouvrir le raster du masque
         mask_ds = gdal.Open(mask_raster_path)
         if mask_ds is None:
-            log_error_and_raise(f"Cannot open mask raster: {mask_raster_path}")
+            log_error_and_raise(
+                f"Impossible d'ouvrir le raster du masque : {mask_raster_path}")
 
-        # Ensure the input raster and mask raster have the same dimensions
+        # Vérifier que les dimensions du raster d'entrée et du masque correspondent
         if (input_raster.RasterXSize != mask_ds.RasterXSize) or (input_raster.RasterYSize != mask_ds.RasterYSize):
             log_error_and_raise(
-                "Input raster and mask raster have different dimensions.")
+                "Le raster d'entrée et le raster du masque ont des dimensions différentes.")
 
-        # Read the input raster and mask raster as arrays
+        # Lire les données des rasters d'entrée et du masque sous forme de tableaux
         input_band = input_raster.GetRasterBand(1)
         input_data = input_band.ReadAsArray()
 
         mask_band = mask_ds.GetRasterBand(1)
         mask_data = mask_band.ReadAsArray()
 
-        # Apply the mask: set non-forest areas to nodata_value
+        # Appliquer le masque : définir les zones non forestières à la valeur NoData
         input_data = np.where(mask_data == 1, input_data, nodata_value)
 
-        # Create a new in-memory raster to hold the masked data
+        # Créer un nouveau raster en mémoire pour contenir les données masquées
         driver = gdal.GetDriverByName('MEM')
         out_ds = driver.Create('', input_raster.RasterXSize,
                                input_raster.RasterYSize, 1, input_band.DataType)
@@ -552,68 +609,68 @@ def apply_mask(input_raster, mask_raster_path, nodata_value):
         out_band.WriteArray(input_data)
         out_band.SetNoDataValue(nodata_value)
 
-        # Release datasets
+        # Libérer les ensembles de données
         mask_ds = None
         input_raster = None
 
         return out_ds
 
     except Exception as e:
-        log_error_and_raise(f"Error during masking: {e}")
+        log_error_and_raise(f"Erreur lors de l'application du masque : {e}")
 
 
 def calculate_ndvi_from_processed_bands(red_raster, nir_raster, nodata_value=-9999):
     """
-    Calculate NDVI from already processed red and NIR rasters.
+    Calcule le NDVI à partir des rasters des bandes rouge et NIR déjà traitées.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     red_raster : gdal.Dataset
-        GDAL dataset for the processed red band.
+        Ensemble de données GDAL pour la bande rouge traitée.
     nir_raster : gdal.Dataset
-        GDAL dataset for the processed NIR band.
-    nodata_value : float, optional
-        NoData value to set in the output raster (default: -9999).
+        Ensemble de données GDAL pour la bande NIR traitée.
+    nodata_value : float, optionnel
+        Valeur NoData à appliquer dans le raster de sortie (par défaut : -9999).
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     gdal.Dataset
-        GDAL in-memory dataset containing the NDVI values.
+        Raster en mémoire contenant les valeurs NDVI.
 
-    Raises:
-    ------
+    Exceptions :
+    -----------
     RuntimeError
-        If any step in the process fails.
+        Si une étape du processus échoue.
     """
     try:
-        logger.info("Calculating NDVI from processed bands...")
+        logger.info("Calcul du NDVI à partir des bandes traitées...")
 
-        # Ensure the rasters have the same dimensions
+        # Vérifier que les rasters ont les mêmes dimensions
         if (red_raster.RasterXSize != nir_raster.RasterXSize) or (red_raster.RasterYSize != nir_raster.RasterYSize):
             log_error_and_raise(
-                "Red and NIR rasters have different dimensions.")
+                "Les rasters rouge et NIR n'ont pas les mêmes dimensions.")
 
-        # Read the data as arrays
+        # Lire les données sous forme de tableaux
         red_band = red_raster.GetRasterBand(1)
         nir_band = nir_raster.GetRasterBand(1)
         red_data = red_band.ReadAsArray().astype('float32')
         nir_data = nir_band.ReadAsArray().astype('float32')
 
-        # Get NoData values
+        # Obtenir les valeurs NoData
         red_nodata = red_band.GetNoDataValue()
         nir_nodata = nir_band.GetNoDataValue()
 
-        # Create a mask for NoData values
+        # Créer un masque pour les valeurs NoData
         mask = (red_data == red_nodata) | (nir_data == nir_nodata)
 
-        # Suppress division warnings
+        # Supprimer les avertissements liés à la division
         np.seterr(divide='ignore', invalid='ignore')
 
-        # Calculate NDVI
+        # Calculer le NDVI
         ndvi = (nir_data - red_data) / (nir_data + red_data)
         ndvi = np.where(mask, nodata_value, ndvi)
 
-        # Create an in-memory raster for NDVI
+        # Créer un raster en mémoire pour stocker les valeurs NDVI
         driver = gdal.GetDriverByName('MEM')
         ndvi_raster = driver.Create(
             '', red_raster.RasterXSize, red_raster.RasterYSize, 1, gdal.GDT_Float32)
@@ -623,50 +680,56 @@ def calculate_ndvi_from_processed_bands(red_raster, nir_raster, nodata_value=-99
         ndvi_band.WriteArray(ndvi)
         ndvi_band.SetNoDataValue(nodata_value)
 
-        # Release datasets
+        # Libérer les ensembles de données
         red_raster = None
         nir_raster = None
 
         return ndvi_raster
 
     except Exception as e:
-        log_error_and_raise(f"Error during NDVI calculation: {e}")
+        log_error_and_raise(f"Erreur lors du calcul du NDVI : {e}")
 
 
 def merge_rasters(raster_list, output_path, band_names, pixel_type, compression="LZW", nodata_value=None):
     """
-    Merge multiple rasters into a single multiband raster.
+    Fusionne plusieurs rasters en un raster multibande unique.
 
-    Parameters:
-    ----------
+    Paramètres :
+    -----------
     raster_list : list
-        List of GDAL datasets to merge.
+        Liste des ensembles de données GDAL à fusionner.
     output_path : str
-        Path to save the final multiband raster.
-    band_names : list, optional
-        List of band names corresponding to the rasters.
+        Chemin pour sauvegarder le raster multibande final.
+    band_names : list, optionnel
+        Liste des noms de bandes correspondant aux rasters.
     pixel_type : str
-        Data type of the output raster (e.g., "UInt16", "Float32").
+        Type de données du raster de sortie (ex : "UInt16", "Float32").
     compression : str
-        Compression type for the output raster (default: "LZW").
-    nodata_value : int or float, optional
-        NoData value to set in the output raster bands.
+        Type de compression pour le raster de sortie (par défaut : "LZW").
+    nodata_value : int ou float, optionnel
+        Valeur NoData à appliquer dans les bandes du raster de sortie.
 
-    Returns:
-    -------
+    Retourne :
+    ---------
     None
+
+    Exceptions :
+    -----------
+    RuntimeError
+        Si le processus de fusion échoue.
     """
     try:
-        logger.info("Merging rasters into a single multiband raster...")
+        logger.info("Fusion des rasters en un raster multibande unique...")
 
-        # Build VRT (Virtual Dataset)
+        # Construction du VRT (Virtual Dataset)
         vrt_options = gdal.BuildVRTOptions(
             resampleAlg="nearest", addAlpha=False, separate=True)
         vrt = gdal.BuildVRT('', raster_list, options=vrt_options)
         if vrt is None:
-            log_error_and_raise("Failed to build VRT for merging rasters.")
+            log_error_and_raise(
+                "Échec de la construction du VRT pour la fusion des rasters.")
 
-        # Set band descriptions and NoData values if provided
+        # Définir les descriptions des bandes et les valeurs NoData si fournies
         for i in range(vrt.RasterCount):
             band = vrt.GetRasterBand(i + 1)
             if band_names and i < len(band_names):
@@ -674,52 +737,435 @@ def merge_rasters(raster_list, output_path, band_names, pixel_type, compression=
             if nodata_value is not None:
                 band.SetNoDataValue(nodata_value)
 
-        # Prepare creation options
+        # Préparation des options de création
         creation_options = [f"COMPRESS={compression}", "BIGTIFF=YES"]
 
-        # Translate VRT to GeoTIFF
+        # Conversion du VRT en GeoTIFF
         gdal.Translate(output_path, vrt, format="GTiff",
                        creationOptions=creation_options,
                        outputType=getattr(gdal, f"GDT_{pixel_type}"))
 
-        # Release datasets
+        # Libération des ensembles de données
         vrt = None
         for ds in raster_list:
             ds = None
 
-        logger.info(f"Multiband raster saved to: {output_path}")
+        logger.info(f"Raster multibande sauvegardé : {output_path}")
 
     except Exception as e:
-        log_error_and_raise(f"Error during merging rasters: {e}")
+        log_error_and_raise(f"Erreur lors de la fusion des rasters : {e}")
 
 
-# ================================= #
-# === FILE MANAGEMENT FUNCTIONS === #
-# ================================= #
+# ======================================== #
+# ===    FONCTIONS POUR L'ANALYSE      === #
+# ===        DES ÉCHANTILLONS          === #
+# ======================================== #
+
+# ======================================== #
+# ===      NOMBRES D'ÉCHANTILLONS      === #
+# ======================================== #
 
 
-def find_raster_bands(folder_path, band_prefixes):
+# ======================================== #
+# ===  PHÉNOLOGIE DES PEUPLEMENTS PURS === #
+# ======================================== #
+# ======================================== #
+# ===   FONCTIONS POUR L'ANALYSE DE    === #
+# ===     LA VARIABILITÉ SPECTRALE     === #
+# ======================================== #
+"""
+Fonctions pour l'Analyse de Variabilité Spectrale
+
+Ces fonctions servent à extraire les valeurs NDVI à l’échelle du pixel, 
+par classe ou par polygone, à calculer le centroïde et les distances
+au centroïde des classes et des polygones, ainsi qu’à générer des graphiques.
+"""
+
+
+def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path, groupes):
     """
-    Find and filter raster bands based on prefixes.
-
-    Parameters:
-    ----------
-    folder_path : str
-        Path to the folder containing raster files.
-    band_prefixes : list
-        List of band prefixes to filter (e.g., ["FRE_B2", "FRE_B3", "FRE_B4", "FRE_B8"]).
-
-    Returns:
-    -------
-    list
-        List of paths to the filtered raster files ending with '.tif' and matching the band prefixes.
+    Extrait les valeurs NDVI pour chaque classe au niveau du pixel, 
+    mais seulement pour les classes présentes dans le dictionnaire 'groupes'.
     """
-    raster_files = []
-    for root, dirs, files in os.walk(folder_path):
-        for file in files:
-            # Check if the file ends with '.tif'
-            if file.endswith('.tif'):
-                # Check if the file contains any of the specified band prefixes
-                if any(prefix in file for prefix in band_prefixes):
-                    raster_files.append(os.path.join(root, file))
-    return raster_files
+    try:
+        logger.info(
+            "Chargement du shapefile et du raster NDVI pour extraction par classe...")
+        gdf = gpd.read_file(shapefile_path)
+        if 'Nom' not in gdf.columns:
+            log_error_and_raise(
+                "La colonne 'Nom' est requise dans le shapefile.")
+
+        # Filtrer uniquement les classes présentes dans 'groupes'
+        classes_valide = set(groupes.keys())
+        gdf = gdf[gdf['Nom'].isin(classes_valide)]
+        if gdf.empty:
+            log_error_and_raise(
+                "Aucune classe dans le shapefile ne correspond aux classes du dictionnaire 'groupes'.")
+
+        # Dissoudre par classe
+        logger.info("Dissolution des polygones par classe...")
+        gdf_classes = gdf.dissolve(by='Nom')
+        gdf_classes['ClassID'] = range(1, len(gdf_classes) + 1)
+
+        temp_class_shp = "classes_dissolues.shp"
+        gdf_classes.to_file(temp_class_shp)
+
+        src = gdal.Open(raster_path)
+        if src is None:
+            log_error_and_raise("Impossible d'ouvrir le raster NDVI.")
+
+        geotransform = src.GetGeoTransform()
+        projection = src.GetProjection()
+        xsize = src.RasterXSize
+        ysize = src.RasterYSize
+        n_bandes = src.RasterCount
+
+        logger.info("Rasterisation des classes...")
+        driver = gdal.GetDriverByName('MEM')
+        class_raster = driver.Create('', xsize, ysize, 1, gdal.GDT_Int16)
+        class_raster.SetGeoTransform(geotransform)
+        class_raster.SetProjection(projection)
+
+        band = class_raster.GetRasterBand(1)
+        band.Fill(0)  # 0 = aucune classe
+        band.SetNoDataValue(0)
+
+        ds = ogr.Open(temp_class_shp)
+        layer = ds.GetLayer()
+
+        gdal.RasterizeLayer(class_raster, [1], layer, options=[
+                            "ATTRIBUTE=ClassID"])
+
+        logger.info("Lecture de toutes les bandes NDVI...")
+        ndvi_data = src.ReadAsArray()
+
+        class_arr = class_raster.ReadAsArray()
+
+        resultats_par_classe = {}
+        for idx, row in gdf_classes.iterrows():
+            classe = str(idx)  # idx est la classe (Nom)
+            class_id = row['ClassID']
+            mask_classe = (class_arr == class_id)
+            pixels_classe = ndvi_data[:, mask_classe].T
+            total_pixels = pixels_classe.shape[0]
+            resultats_par_classe[classe] = {
+                "total_pixels": total_pixels,
+                "ndvi_means": pixels_classe
+            }
+
+        logger.info("Extraction des valeurs NDVI par classe terminée.")
+        return resultats_par_classe
+
+    except Exception as e:
+        log_error_and_raise(
+            f"Erreur lors de l'extraction des valeurs NDVI par classe : {e}")
+
+
+def extraire_valeurs_ndvi_par_polygone(shapefile_path, raster_path, groupes):
+    """
+    Extrait les valeurs NDVI pour chaque polygone, uniquement pour les classes présentes dans 'groupes'.
+    """
+    try:
+        logger.info(
+            "Chargement du shapefile et du raster NDVI pour extraction par polygone...")
+        gdf = gpd.read_file(shapefile_path)
+        if 'Nom' not in gdf.columns:
+            log_error_and_raise(
+                "La colonne 'Nom' est requise dans le shapefile.")
+
+        # Filtrer les classes
+        classes_valide = set(groupes.keys())
+        gdf = gdf[gdf['Nom'].isin(classes_valide)]
+        if gdf.empty:
+            log_error_and_raise(
+                "Aucune classe dans le shapefile ne correspond aux classes du dictionnaire 'groupes'.")
+
+        if 'PolyIntID' not in gdf.columns:
+            gdf['PolyIntID'] = range(1, len(gdf) + 1)
+
+        temp_poly_shp = "polygones_int_id.shp"
+        gdf.to_file(temp_poly_shp)
+
+        src = gdal.Open(raster_path)
+        if src is None:
+            log_error_and_raise("Impossible d'ouvrir le raster NDVI.")
+
+        geotransform = src.GetGeoTransform()
+        projection = src.GetProjection()
+        xsize = src.RasterXSize
+        ysize = src.RasterYSize
+        n_bandes = src.RasterCount
+
+        logger.info("Rasterisation des polygones...")
+        driver = gdal.GetDriverByName('MEM')
+        poly_raster = driver.Create('', xsize, ysize, 1, gdal.GDT_Int32)
+        poly_raster.SetGeoTransform(geotransform)
+        poly_raster.SetProjection(projection)
+
+        band = poly_raster.GetRasterBand(1)
+        band.Fill(0)
+        band.SetNoDataValue(0)
+
+        ds = ogr.Open(temp_poly_shp)
+        layer = ds.GetLayer()
+
+        gdal.RasterizeLayer(poly_raster, [1], layer, options=[
+                            "ATTRIBUTE=PolyIntID"])
+
+        logger.info("Lecture de toutes les bandes NDVI...")
+        ndvi_data = src.ReadAsArray()
+
+        poly_arr = poly_raster.ReadAsArray()
+
+        resultats_par_polygone = {}
+        for i, row in gdf.iterrows():
+            poly_int_id = row['PolyIntID']
+            poly_class = row['Nom']
+            original_id = row['ID'] if 'ID' in gdf.columns else None
+            mask_poly = (poly_arr == poly_int_id)
+            pixels_poly = ndvi_data[:, mask_poly].T
+            total_pixels = pixels_poly.shape[0]
+
+            resultats_par_polygone[poly_int_id] = {
+                "ndvi_means": pixels_poly,
+                "total_pixels": total_pixels,
+                "class": poly_class,
+                "original_id": original_id
+            }
+
+        logger.info("Extraction des valeurs NDVI par polygone terminée.")
+        return resultats_par_polygone
+
+    except Exception as e:
+        log_error_and_raise(
+            f"Erreur lors de l'extraction des valeurs NDVI par polygone : {e}")
+
+
+def calculer_centroide_et_distances(valeurs_ndvi, niveau="classe", classes=None):
+    """
+    Calcule le centroïde et les distances moyennes au centroïde.
+
+    Paramètres :
+    -----------
+    valeurs_ndvi : dict
+        Dictionnaire contenant les NDVI par classe ou par polygone.
+        Les valeurs NDVI doivent être un array (N_observations, N_bandes) où:
+        - Si niveau="classe": N_observations = N_pixels de la classe
+        - Si niveau="polygone": N_observations = N_pixels du polygone
+    niveau : str
+        Niveau d'analyse, "classe" ou "polygone".
+    classes : dict, optionnel
+        Dictionnaire associant chaque polygone (ID) à sa classe.
+
+    Retourne :
+    ---------
+    dict
+        {
+          cle: {
+             "centroide": array (n_bandes,) ou None,
+             "distance_moyenne": float ou None,
+             "classe": str ou None
+          }
+        }
+        Si pas de NDVI, distance_moyenne et centroide = None.
+    """
+    try:
+        resultats = {}
+
+        for cle, valeurs in valeurs_ndvi.items():
+            valeurs_array = valeurs["ndvi_means"]
+            if valeurs_array is None or valeurs_array.size == 0:
+                logger.warning(f"Aucune valeur NDVI pour {cle}. Ignoré.")
+                # On retourne quand même une entrée pour éviter KeyError plus tard
+                classe_associee = valeurs.get("class", None)
+                if niveau == "polygone" and classes and (cle in classes):
+                    classe_associee = classes[cle]
+
+                resultats[cle] = {
+                    "centroide": None,
+                    "distance_moyenne": None,
+                    "classe": classe_associee
+                }
+                continue
+
+            # Assurer deux dimensions
+            if valeurs_array.ndim == 1:
+                valeurs_array = valeurs_array[np.newaxis, :]
+
+            centroide = np.mean(valeurs_array, axis=0)  # (n_bandes,)
+            distances = np.sqrt(np.sum((valeurs_array - centroide)**2, axis=1))
+            distance_moyenne = np.mean(distances)
+
+            classe_associee = valeurs.get("class", None)
+            if niveau == "polygone" and classes and (cle in classes):
+                classe_associee = classes[cle]
+
+            resultats[cle] = {
+                "centroide": centroide,
+                "distance_moyenne": distance_moyenne,
+                "classe": classe_associee
+            }
+
+        return resultats
+
+    except Exception as e:
+        log_error_and_raise(
+            f"Erreur lors du calcul du centroïde et des distances : {e}")
+
+
+def plot_barchart_distance_classes(distances_par_classe, output_path, groupes):
+    """
+    Génère un diagramme en bâton des distances moyennes au centrôide pour chaque classe.
+
+    Paramètres :
+    -----------
+    distances_par_classe : dict
+        Dictionnaire {classe: distance_moyenne}
+    output_path : str
+        Chemin de sauvegarde du graphique.
+    groupes : dict
+        Dictionnaire associant chaque classe à "Pur" ou "Mélange".
+    """
+    # Préparation des données
+    data = [(classe, distance, groupes.get(classe, "Autre"))
+            for classe, distance in distances_par_classe.items()]
+    data_sorted = sorted(data, key=lambda x: (x[2] != "Pur", x[0]))
+
+    # Décomposition des données pour le graphique
+    classes = [item[0] for item in data_sorted]
+    distances = [item[1] for item in data_sorted]
+    couleurs = ['#FF9999' if item[2] ==
+                "Pur" else '#66B3FF' for item in data_sorted]
+
+    # Création du graphique
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Dessiner les barres
+    bars = ax.bar(classes, distances, color=couleurs, edgecolor="black")
+
+    # Ajouter des étiquettes sur chaque barre
+    for bar in bars:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height + 50, f"{height:.2f}",
+                ha='center', va='bottom', fontsize=9)
+
+    # Personnalisation des axes et du titre
+    ax.set_title("Distance moyenne des pixels au centrôide de leur classe",
+                 fontsize=14, fontweight="bold")
+    ax.set_xlabel("Classe", fontsize=12)
+    ax.set_ylabel("Distance moyenne au centrôide", fontsize=12)
+    ax.set_xticks(range(len(classes)))
+    ax.set_xticklabels(classes, rotation=45, ha="right", fontsize=9)
+
+    # Ajustement de la limite supérieure de Y
+    ax.set_ylim(0, max(distances) * 1.2)
+
+    # Ajout d'une légende
+    legend_handles = [plt.Rectangle((0, 0), 1, 1, facecolor='#FF9999', edgecolor="black", label="Pur"),
+                      plt.Rectangle((0, 0), 1, 1, facecolor='#66B3FF', edgecolor="black", label="Mélange")]
+
+    ax.legend(handles=legend_handles, title="Essences", loc="upper right")
+
+    # Amélioration de l'affichage
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
+    plt.tight_layout()
+
+    # Sauvegarde du graphique
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    logger.info(f"Graphique sauvegardé : {output_path}")
+
+
+def plot_violin_distance_polygons(distances_par_polygone, classes_polygones, output_path, groupes):
+    """
+    Génère un violin plot des distances moyennes au centrôide par classe, à l'échelle des polygones.
+    Les classes pures (Pur) sont affichées en premier (en rouge), et les classes mélange (Mélange) en second (en bleu).
+    Un violon par classe.
+
+    Paramètres :
+    -----------
+    distances_par_polygone : list of float
+        Liste des distances moyennes au centrôide pour chaque polygone.
+    classes_polygones : list of str
+        Liste des classes associées à chaque polygone, dans le même ordre que distances_par_polygone.
+    output_path : str
+        Chemin pour sauvegarder l'image.
+    groupes : dict
+        Dictionnaire associant chaque classe à "Pur" ou "Mélange".
+
+    Note :
+    Cette fonction suit la même logique de tri que le bar plot : d'abord les classes "Pur" puis "Mélange",
+    classées alphabétiquement dans chaque groupe.
+    """
+
+    plt.style.use('ggplot')
+
+    # Agréger les distances par classe
+    distances_par_classe = {}
+    for dist, cls in zip(distances_par_polygone, classes_polygones):
+        if cls not in distances_par_classe:
+            distances_par_classe[cls] = []
+        distances_par_classe[cls].append(dist)
+
+    # Déterminer le groupe (Pur/Mélange) de chaque classe
+    classes_data = [(cls, np.median(distances_par_classe[cls]), groupes.get(cls, "Autre"))
+                    for cls in distances_par_classe]
+
+    # Trier les données : Pur d'abord, puis Mélange, puis Autre (si existe), par ordre alphabétique dans chaque groupe
+    classes_data_sorted = sorted(
+        classes_data, key=lambda x: (x[2] != "Pur", x[0]))
+
+    # Extraire la liste des classes triées et des données correspondantes
+    classes_ordre = [item[0] for item in classes_data_sorted]
+    data = [distances_par_classe[cls] for cls in classes_ordre]
+    groupes_ordre = [groupes.get(cls, "Autre") for cls in classes_ordre]
+
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # Création du violon plot par classe
+    violin_parts = ax.violinplot(
+        data, showmeans=True, showmedians=True, showextrema=True)
+
+    # Appliquer les couleurs en fonction du groupe
+    # Pur (rouge), Mélange (bleu)
+    for i, pc in enumerate(violin_parts['bodies']):
+        if groupes_ordre[i] == "Pur":
+            pc.set_facecolor('#FF9999')
+        else:
+            pc.set_facecolor('#66B3FF')
+        pc.set_edgecolor('black')
+        pc.set_alpha(0.7)
+
+    # Personnalisation des lignes (médianes, extrêmes, etc.)
+    for partname in ('cbars', 'cmins', 'cmaxes', 'cmedians'):
+        vp = violin_parts[partname]
+        vp.set_edgecolor('black')  # Couleur noire pour les lignes principales
+        vp.set_linewidth(1)
+
+    # Personnalisation des axes et du titre
+    ax.set_xticks(range(1, len(classes_ordre) + 1))
+    ax.set_xticklabels(classes_ordre, fontsize=9, rotation=45, ha='right')
+    ax.set_ylabel("Distance moyenne au centrôide", fontsize=12)
+    ax.set_title("Distribution des distances moyennes par polygone, par classe",
+                 fontsize=14, fontweight="bold")
+
+    # Légende
+    legend_handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor='#FF9999',
+                      edgecolor='black', label="Pur"),  # Classes pures
+        plt.Rectangle((0, 0), 1, 1, facecolor='#66B3FF',
+                      edgecolor='black', label="Mélange"),  # Classes mélanges
+        Line2D([0], [0], color='red', linestyle='-',
+               linewidth=1, label="Médiane")  # Line rouge
+    ]
+
+    fig.subplots_adjust(right=0.8)  # Réserver un espace pour la légende
+    ax.legend(handles=legend_handles, title="Essences",
+              loc="upper right", bbox_to_anchor=(1.13, 1.015))
+
+    plt.grid(axis='y', linestyle='--', alpha=0.5)
+    plt.tight_layout()
+
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close()
+    logger.info(f"Graphique sauvegardé : {output_path}")

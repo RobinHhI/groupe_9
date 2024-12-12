@@ -4,12 +4,12 @@
 Script pour l'analyse de la variabilité spectrale de la BD forêt.
 """
 
-from my_function_lucas import (extraire_valeurs_ndvi_par_classe,
-                               extraire_valeurs_ndvi_par_polygone,
-                               calculer_centroide_et_distances,
-                               plot_barchart_distance_classes,
-                               plot_violin_distance_polygons,
-                               log_error_and_raise)
+from my_function import (extraire_valeurs_ndvi_par_classe,
+                         extraire_valeurs_ndvi_par_polygone,
+                         calculer_centroide_et_distances,
+                         plot_barchart_distance_classes,
+                         plot_violin_distance_polygons,
+                         log_error_and_raise)
 import os
 import time
 
@@ -42,7 +42,7 @@ try:
     print("Extraction des valeurs NDVI par classe...")
     start_time = time.time()
     resultats_par_classe = extraire_valeurs_ndvi_par_classe(
-        shapefile_path, raster_path)
+        shapefile_path, raster_path, groupes)
     end_time = time.time()
     minutes, seconds = divmod(end_time - start_time, 60)
     print(
@@ -75,7 +75,7 @@ try:
     print("Extraction des valeurs NDVI par polygone...")
     start_time = time.time()
     resultats_par_polygone = extraire_valeurs_ndvi_par_polygone(
-        shapefile_path, raster_path)
+        shapefile_path, raster_path, groupes)
     end_time = time.time()
     minutes, seconds = divmod(end_time - start_time, 60)
     print(
