@@ -12,7 +12,7 @@ Ce script permet de réaliser une analyse des échantillons de la BD forêt filt
 Créé le 5 décembre 2024
 """
 
-from my_function_robin import sample_data_analysis
+from my_function import sample_data_analysis
 
 shapefile_path = "groupe_9/results/data/sample/Sample_BD_foret_T31TCJ.shp"
 raster_path = "groupe_9/results/data/img_pretraitees/masque_foret.tif"

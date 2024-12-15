@@ -10,7 +10,7 @@ Il produit des subplots de séries temporelles de NDVI pour les classes indiqué
 Créé le 6 décembre 2024
 """
 
-from my_function_robin import process_ndvi
+from my_function import process_ndvi
 
 
 raster_path = "groupe_9/results/data/img_pretraitees/Serie_temp_S2_ndvi.tif"

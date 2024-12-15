@@ -3,6 +3,7 @@ import logging
 import geopandas as gpd
 from osgeo import gdal
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 import matplotlib
 matplotlib.use('Agg') 
 from rasterstats import zonal_stats
@@ -14,57 +15,93 @@ import pandas as pd
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 logger = logging.getLogger()
 
+# Fonction principale
+
 def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, output_dir):
     """
-    Fonction pour analyser les échantillons :
-    - 1 Créer un diagramme bâton du nombre de polygones par classe.
-    - 2 Créer un diagramme bâton du nombre de pixels du raster de référence par classe.
-    - 3 Créer un violon plot de la distribution du nombre de pixels par classe de polygone.
+    Analyse les données à partir d'un shapefile et d'un raster pour générer des graphiques :
+    - Diagramme bâton du nombre de polygones par classe.
+    - Diagramme bâton du nombre de pixels par classe.
+    - Violon plot de la distribution des pixels par classe.
 
-    :param shapefile_path: Chemin du fichier shapefile
-    :param raster_path: Chemin du fichier raster
-    :param classes_a_conserver: Liste des classes à conserver
-    :param output_dir: Dossier où les graphiques seront sauvegardés
+    :param shapefile_path: Chemin vers le fichier shapefile.
+    :param raster_path: Chemin vers le fichier raster.
+    :param classes_a_conserver: Liste des classes à conserver dans l'analyse.
+    :param output_dir: Répertoire où les graphiques seront sauvegardés.
     """
-    # Vérification des chemins d'entrée
+    if not validate_inputs(shapefile_path, raster_path, output_dir):
+        return
+
+    gdf = load_and_filter_shapefile(shapefile_path, classes_a_conserver)
+
+    create_bar_plot_polygons_by_class(gdf, output_dir)
+
+    stats = calculate_zonal_stats(gdf, raster_path)
+    create_bar_plot_pixels_by_class(stats, output_dir)
+
+    create_violin_plot_pixel_distribution(stats, output_dir)
+
+    logger.info("Analyse terminée. Les graphiques ont été sauvegardés.")
+
+# Validation des entrées
+
+def validate_inputs(shapefile_path, raster_path, output_dir):
+    """
+    Valide les chemins d'entrée et crée le répertoire de sortie si nécessaire.
+
+    :param shapefile_path: Chemin vers le fichier shapefile.
+    :param raster_path: Chemin vers le fichier raster.
+    :param output_dir: Répertoire où les graphiques seront sauvegardés.
+    :return: True si les entrées sont valides, False sinon.
+    """
     if not os.path.exists(shapefile_path):
         logger.error(f"Le fichier shapefile {shapefile_path} n'existe pas.")
-        return
+        return False
 
     if not os.path.exists(raster_path):
         logger.error(f"Le fichier raster {raster_path} n'existe pas.")
-        return
+        return False
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    # Chargement du shapefile
-    logger.info("Chargement du shapefile...")
+    return True
+
+# Chargement et filtrage du shapefile
+
+def load_and_filter_shapefile(shapefile_path, classes_a_conserver):
+    """
+    Charge le shapefile et filtre les données en fonction des classes spécifiées.
+
+    :param shapefile_path: Chemin vers le fichier shapefile.
+    :param classes_a_conserver: Liste des classes à conserver.
+    :return: GeoDataFrame filtré.
+    """
+    logger.info("Chargement et filtrage du shapefile...")
     gdf = gpd.read_file(shapefile_path)
+    return gdf[gdf['Nom'].isin(classes_a_conserver)]
 
-    # Filtrage des classes
-    logger.info("Filtrage des classes...")
-    gdf = gdf[gdf['Nom'].isin(classes_a_conserver)]
+# Création d'un diagramme bâton pour les polygones
 
-    # 1. Diagramme bâton du nombre de polygones par classe
+def create_bar_plot_polygons_by_class(gdf, output_dir):
+    """
+    Crée un diagramme bâton représentant le nombre de polygones par classe.
+
+    :param gdf: GeoDataFrame contenant les données filtrées.
+    :param output_dir: Répertoire où le graphique sera sauvegardé.
+    """
     logger.info("Création du diagramme bâton du nombre de polygones par classe...")
 
-    # Calcul du nombre de polygones par classe
-    polygones_par_classe = gdf['Nom'].value_counts()
-
-    # Création du diagramme
+    # Compter les polygones par classe et trier dans l'ordre décroissant
+    polygones_par_classe = gdf['Nom'].value_counts().sort_values(ascending=False)
+    
     plt.figure(figsize=(10, 6))
     ax = polygones_par_classe.plot(kind='bar', color='skyblue', edgecolor='black')
 
+    # Ajouter les annotations au-dessus des barres
     for i, value in enumerate(polygones_par_classe):
         ax.text(
-            i,
-            value + 0.5,
-            str(value),
-            ha='center',
-            va='bottom',
-            fontsize=10,
-            color='black'
+            i, value + 0.5, str(value), ha='center', va='bottom', fontsize=10, color='black'
         )
 
     plt.title('Nombre de polygones par classe', fontsize=16)
@@ -73,28 +110,43 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
     plt.xticks(rotation=45, fontsize=12)
     plt.tight_layout()
 
-    # Sauvegarde
+    # Enregistrer le graphique
     output_path = os.path.join(output_dir, 'diag_baton_nb_poly_by_class.png')
     plt.savefig(output_path, dpi=300)
     plt.close()
 
-    logger.info("Diagramme bâton sauvegardé avec succès.")
+    logger.info("Diagramme bâton des polygones sauvegardé avec succès.")
 
-    # 2. Diagramme bâton du nombre de pixels par classe
-     
+
+# Calcul des statistiques zonales
+
+def calculate_zonal_stats(gdf, raster_path):
+    """
+    Calcule les statistiques zonales pour les polygones dans le GeoDataFrame à partir du raster.
+
+    :param gdf: GeoDataFrame contenant les données filtrées.
+    :param raster_path: Chemin vers le fichier raster.
+    :return: Liste des statistiques zonales.
+    """
     logger.info("Calcul des statistiques zonales...")
-    stats = zonal_stats(gdf, raster_path, stats=['sum'], geojson_out=True)
+    return zonal_stats(gdf, raster_path, stats=['sum'], geojson_out=True)
 
+# Création d'un diagramme bâton pour les pixels
+
+def create_bar_plot_pixels_by_class(stats, output_dir):
+    """
+    Crée un diagramme bâton représentant le nombre total de pixels par classe.
+
+    :param stats: Liste des statistiques zonales calculées.
+    :param output_dir: Répertoire où le graphique sera sauvegardé.
+    """
     logger.info("Création du diagramme bâton du nombre de pixels par classe...")
+
     pixel_counts = {}
     for feature in stats:
         classe = feature['properties']['Nom']
-        if classe in pixel_counts:
-            pixel_counts[classe] += feature['properties']['sum']
-        else:
-            pixel_counts[classe] = feature['properties']['sum']
+        pixel_counts[classe] = pixel_counts.get(classe, 0) + feature['properties']['sum']
 
-        # Création du diagramme bâton
     plt.figure(figsize=(10, 6))
     bars = plt.bar(
         pixel_counts.keys(),
@@ -103,7 +155,6 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
         edgecolor='black'
     )
 
-    # Ajustement des étiquettes sur les barres
     for bar in bars:
         height = bar.get_height()
         plt.text(
@@ -115,158 +166,159 @@ def sample_data_analysis(shapefile_path, raster_path, classes_a_conserver, outpu
             fontsize=10
         )
 
-    # Ajuster les marges pour éviter que les étiquettes ne débordent
     plt.ylim(0, max(pixel_counts.values()) * 1.1)
     plt.subplots_adjust(top=0.9)
-
-    # Personnalisation des axes et titre
     plt.title('Nombre de pixels par classe', fontsize=16)
     plt.xlabel('Classe', fontsize=14)
     plt.ylabel('Nombre de pixels', fontsize=14)
     plt.xticks(rotation=45, fontsize=12)
     plt.tight_layout()
 
-    # Sauvegarde du graphique
     output_path = os.path.join(output_dir, 'diag_baton_nb_pix_by_class.png')
     plt.savefig(output_path, dpi=300)
     plt.close()
 
-    logger.info("Diagramme bâton sauvegardé avec succès.")
+    logger.info("Diagramme bâton des pixels sauvegardé avec succès.")
 
-    # 3. Violin plot des pixels par classe
+# Création d'un violon plot pour la distribution des pixels
 
+def create_violin_plot_pixel_distribution(stats, output_dir):
+    """
+    Crée un violon plot représentant la distribution des pixels par classe de polygone.
+
+    :param stats: Liste des statistiques zonales calculées.
+    :param output_dir: Répertoire où le graphique sera sauvegardé.
+    """
     logger.info("Création du violon plot de la distribution des pixels par classe...")
+
+    # Regrouper les valeurs par classe
     distribution_par_classe = {}
     for feature in stats:
         classe = feature['properties']['Nom']
         valeur = feature['properties']['sum']
-        if classe in distribution_par_classe:
-            distribution_par_classe[classe].append(valeur)
-        else:
-            distribution_par_classe[classe] = [valeur]
+        distribution_par_classe.setdefault(classe, []).append(valeur)
 
-    # Configuration du style
-    plt.style.use('ggplot')
-    plt.figure(figsize=(12, 8))
+    # Conversion en listes
+    classes = list(distribution_par_classe.keys())
+    distributions = list(distribution_par_classe.values())
+
+    # Configuration du style du graphique
+    plt.style.use('seaborn-v0_8-whitegrid')
+    plt.figure(figsize=(14, 8))
 
     # Création du violon plot
     parts = plt.violinplot(
-        distribution_par_classe.values(),
-        showmeans=False,
+        distributions,
+        showmeans=True,
         showmedians=True,
         showextrema=False,
-        widths=0.8
+        widths=0.7
     )
 
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b', '#e377c2', '#7f7f7f']
-    for i, pc in enumerate(parts['bodies']):
-        pc.set_facecolor(colors[i % len(colors)])
+    for pc in parts['bodies']:
+        pc.set_facecolor('#D3D3D3')
         pc.set_edgecolor('black')
         pc.set_alpha(0.8)
 
+    # Personnalisation des lignes (médianes et moyennes)
+    if 'cmeans' in parts:
+        parts['cmeans'].set_color('blue')
+        parts['cmeans'].set_linewidth(1.5)
     if 'cmedians' in parts:
-        parts['cmedians'].set_edgecolor('#333333')
-        parts['cmedians'].set_linewidth(1.5)
+        parts['cmedians'].set_color('red')
+        parts['cmedians'].set_linewidth(2)
 
-    # Labels et titres
+    # Configurations des axes et titres
     plt.xticks(
-        range(1, len(distribution_par_classe) + 1),
-        distribution_par_classe.keys(),
+        range(1, len(classes) + 1),
+        classes,
         rotation=45,
         fontsize=12
     )
-    plt.title('Distribution du nombre de pixels par classe de polygone', fontsize=18)
+    plt.title('Distribution des Pixels par Classe de Polygone', fontsize=18, fontweight='bold')
     plt.xlabel('Classe', fontsize=14)
-    plt.ylabel('Nombre de pixels', fontsize=14)
-    plt.grid(visible=True, linestyle='--', alpha=0.7)
+    plt.ylabel('Nombre de Pixels', fontsize=14)
 
-    # Limites de l'axe Y
+    # Ajout des limites de l'axe Y
     plt.ylim(bottom=0, top=15000)
+
+    # Légende
+    plt.legend([
+        plt.Line2D([0], [0], color='red', lw=2),
+        plt.Line2D([0], [0], color='blue', lw=1.5),
+        mpatches.Patch(facecolor='#D3D3D3', edgecolor='black', alpha=0.8)
+    ], ['Médiane', 'Moyenne', 'Distribution'], loc='upper right', fontsize=10)
+
     plt.tight_layout()
 
-    # Sauvegarde
+    # Sauvegarde du graphique
     output_path = os.path.join(output_dir, 'violin_plot_nb_pix_by_poly_by_class.png')
     plt.savefig(output_path, dpi=300)
     plt.close()
 
-    logger.info("Analyse terminée. Les graphiques ont été sauvegardés.")
+    logger.info(f"Violon plot sauvegardé avec succès : {output_path}")
 
-def process_ndvi(
-    raster_path,
-    shapefile_path,
-    classes_interet,
-    output_plot_path=None
-):
+
+def load_and_filter_shapefile(shapefile_path, classes_interet):
     """
-    Traite un raster NDVI multibandes et un shapefile pour calculer les statistiques NDVI
-    globales par classe et tracer des séries temporelles.
-
-    Args:
-        raster_path (str): Chemin vers le fichier raster NDVI multibandes.
-        shapefile_path (str): Chemin vers le fichier shapefile.
-        classes_interet (list): Liste des classes à conserver.
-        output_plot_path (str): Chemin de sauvegarde pour le plot généré.
+    Charge un shapefile et filtre les entités selon les classes d'intérêt.
     """
-    logger.info("Début du traitement du NDVI.")
-
-    # Charger le shapefile et filtrer les classes d'intérêt
     logger.info("Chargement du shapefile.")
     gdf = gpd.read_file(shapefile_path)
     initial_count = len(gdf)
-    gdf = gdf[gdf['Nom'].isin(classes_interet)]
-    filtered_count = len(gdf)
+    gdf_filtered = gdf[gdf['Nom'].isin(classes_interet)]
+    filtered_count = len(gdf_filtered)
     logger.info(f"Filtrage des classes d'intérêt: {filtered_count} sur {initial_count} entités conservées.")
+    return gdf_filtered
 
-    # Ouvrir le raster avec GDAL
-    logger.info("Ouverture du raster NDVI")
+
+def load_raster_and_metadata(raster_path):
+    """
+    Charge un raster et récupère ses métadonnées.
+    """
+    logger.info("Ouverture du raster NDVI.")
     dataset = gdal.Open(raster_path)
     if dataset is None:
         logger.error(f"Impossible d'ouvrir le raster: {raster_path}")
-        return
-
+        return None, None, None
     nb_bands = dataset.RasterCount
-    logger.info(f"Raster chargé avec {nb_bands} bandes.")
-
-    # Récupérer la transformation affine
     geo_transform = dataset.GetGeoTransform()
     affine_transform = Affine.from_gdal(*geo_transform)
-    logger.info(f"Transformation affine : {affine_transform}")
+    logger.info(f"Raster chargé avec {nb_bands} bandes et transformation affine : {affine_transform}.")
+    return dataset, nb_bands, affine_transform
 
-    # Lire les labels des bandes et extraire les dates
+
+def extract_dates_from_bands(dataset, nb_bands):
+    """
+    Extrait les dates à partir des descriptions des bandes du raster.
+    """
     dates = []
     for band_idx in range(1, nb_bands + 1):
         band = dataset.GetRasterBand(band_idx)
         desc = band.GetDescription()
-
-        # Extraction directe des parties après "NDVI_"
         parts = desc.split("NDVI_")[-1].split("_") if "NDVI_" in desc else []
         month = parts[0] if len(parts) > 0 and parts[0].isdigit() else f"{band_idx:02d}"
         year = parts[1] if len(parts) > 1 and parts[1].isdigit() else "2022"
         dates.append(np.datetime64(f"{year}-{month}"))
+    logger.info(f"Dates extraites des bandes : {dates}.")
+    return dates
 
-    logger.info(f"Dates extraites des bandes : {dates}")
 
-    # Initialiser les dictionnaires pour stocker les statistiques globales par classe
+def compute_zonal_statistics(dataset, gdf, classes_interet, affine_transform, nb_bands):
+    """
+    Calcule les statistiques zonales (moyenne et écart type) pour chaque classe et bande.
+    """
     stats_mean = {classe: [] for classe in classes_interet}
     stats_std = {classe: [] for classe in classes_interet}
 
-    # Itérer sur chaque bande pour calculer les statistiques zonales
     for band_idx in range(1, nb_bands + 1):
         logger.info(f"Traitement de la bande {band_idx}/{nb_bands}.")
         band = dataset.GetRasterBand(band_idx)
         ndvi = band.ReadAsArray()
+        nodata_value = band.GetNoDataValue() or -999
 
-        # Récupérer la valeur nodata
-        nodata_value = band.GetNoDataValue()
-        if nodata_value is None:
-            nodata_value = -999 
-           
-        # Calculer les statistiques globales par classe
         for classe in classes_interet:
-            # Filtrer uniquement les polygones de la classe actuelle
             gdf_classe = gdf[gdf['Nom'] == classe]
-
-            # Calculer les statistiques pour la classe
             zs = zonal_stats(
                 vectors=gdf_classe,
                 raster=ndvi,
@@ -275,8 +327,6 @@ def process_ndvi(
                 geojson_out=False,
                 nodata=nodata_value
             )
-
-            # Extraire les valeurs globales (moyenne et écart type)
             values = [stat['mean'] for stat in zs if stat['mean'] is not None]
             if values:
                 stats_mean[classe].append(np.mean(values))
@@ -284,10 +334,13 @@ def process_ndvi(
             else:
                 stats_mean[classe].append(np.nan)
                 stats_std[classe].append(np.nan)
+    return stats_mean, stats_std
 
-    logger.info("Calcul des statistiques terminé.")
 
-    # Tracer les séries temporelles
+def plot_ndvi_time_series(dates, stats_mean, stats_std, classes_interet, output_plot_path=None):
+    """
+    Trace les séries temporelles NDVI pour chaque classe.
+    """
     logger.info("Création des graphiques des séries temporelles.")
     plt.figure(figsize=(15, 10))
     num_classes = len(classes_interet)
@@ -299,10 +352,7 @@ def process_ndvi(
         mean = np.array(stats_mean[classe])
         std = np.array(stats_std[classe])
 
-        # Utiliser les dates extraites pour l'axe des abscisses
         plt.plot(dates, mean, '-o', label="NDVI : Moyenne ± Écart type")
-
-        # Tracer les écarts types
         plt.fill_between(dates, mean - std, mean + std, color='skyblue', alpha=0.5)
 
         plt.title(f"Série Temporelle NDVI - {classe}")
@@ -318,3 +368,18 @@ def process_ndvi(
         plt.savefig(output_plot_path)
         logger.info(f"Graphique sauvegardé sous {output_plot_path}.")
     plt.show()
+
+
+def process_ndvi(raster_path, shapefile_path, classes_interet, output_plot_path=None):
+    """
+    Traite un raster NDVI multibandes et un shapefile pour calculer les statistiques NDVI
+    globales par classe et tracer des séries temporelles.
+    """
+    logger.info("Début du traitement du NDVI.")
+    gdf = load_and_filter_shapefile(shapefile_path, classes_interet)
+    dataset, nb_bands, affine_transform = load_raster_and_metadata(raster_path)
+    if dataset is None:
+        return
+    dates = extract_dates_from_bands(dataset, nb_bands)
+    stats_mean, stats_std = compute_zonal_statistics(dataset, gdf, classes_interet, affine_transform, nb_bands)
+    plot_ndvi_time_series(dates, stats_mean, stats_std, classes_interet, output_plot_path)
