@@ -68,13 +68,14 @@ out_qualite = os.path.join(out_classif_folder, 'mes_qualites.png')
 
 # 2 --- extract samples
 X, Y, t = cla.get_samples_from_roi(image_filename, raster_sample_filename)
-    
+
 
 X_train, X_test, Y_train, Y_test = train_test_split(X, Y, test_size=test_size)
 
 Y_train = np.ravel(Y_train)
 print(Y_train[0:10])
 
+n_estimators=40
 max_depth =	50
 oob_score = True
 max_samples = 0.75
@@ -82,7 +83,7 @@ class_weight = "balanced"
 
 # 3 --- Train
 #clf = SVC(cache_size=6000)
-clf = RF(max_depth=max_depth, oob_score=oob_score, max_samples=max_samples, class_weight=class_weight)
+clf = RF(n_estimators=n_estimators, max_depth=max_depth, oob_score=oob_score, max_samples=max_samples, class_weight=class_weight)
 #clf = tree.DecisionTreeClassifier(max_leaf_nodes=10)
 clf.fit(X_train, Y_train)
 
