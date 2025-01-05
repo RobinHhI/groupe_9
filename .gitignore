@@ -11,6 +11,7 @@ venv/
 *.xml
 *.tif.aux.xml
 *.pyc
+*.csv
 
 # Ignorer fichiers temporaires
 temp_*.shp
