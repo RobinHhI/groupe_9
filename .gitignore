@@ -18,3 +18,6 @@ temp_*.shx
 temp_*.dbf
 temp_*.prj
 temp_*.cpg
+
+# Fichiers de log
+log.txt
