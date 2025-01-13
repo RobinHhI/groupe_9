@@ -15,11 +15,12 @@ import os
 import sys
 import traceback
 import logging
-import numpy as np
+import pandas as pd
 from osgeo import gdal
 from osgeo import ogr
 
-import geopandas as gpd
+from my_function import get_raster_properties
+
 
 # fonction déjà existante dans my_function.py - à ne pas copier
 # Configuration GDAL
@@ -55,47 +56,23 @@ def log_error_and_raise(message, exception=RuntimeError):
     logger.error(f"{message}\n{traceback.format_exc()}")
     raise exception(message)
 
-
-def get_raster_properties(dataset):
-    """
-    Récupère les propriétés d'un raster à partir d'un dataset GDAL.
-
-    Paramètres :
-    -----------
-    dataset : gdal.Dataset
-        Dataset GDAL en entrée.
-
-    Retourne :
-    ---------
-    tuple
-        Propriétés du raster : (largeur_pixel, hauteur_pixel, xmin, ymin, xmax, ymax, crs).
-
-    Exceptions :
-    -----------
-    ValueError
-        Si le dataset est None ou si la résolution ne correspond pas à 10m attendus.
-    """
-    if dataset is None:
-        raise ValueError(
-            "Le dataset d'entrée est None. Veuillez vérifier le raster en entrée.")
-
-    geotransform = dataset.GetGeoTransform()
-    pixel_width = geotransform[1]
-    pixel_height = abs(geotransform[5])  # Assure une hauteur de pixel positive
-    xmin = geotransform[0]
-    ymax = geotransform[3]
-    xmax = xmin + (dataset.RasterXSize * pixel_width)
-    # Ajustement pour une hauteur négative
-    ymin = ymax - (dataset.RasterYSize * pixel_height)
-    crs = dataset.GetProjection()
-
-    # Vérification si la résolution est environ 10m
-    if not (abs(pixel_width - 10) < 1e-6 and abs(pixel_height - 10) < 1e-6):
-        raise ValueError(
-            f"La résolution du raster ne correspond pas à 10m : ({pixel_width}, {pixel_height})")
-
-    return pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs
 #fin des fonctions déjà existantes
+
+def report_from_dict_to_df(dict_report):
+
+    # convert report into dataframe
+    report_df = pd.DataFrame.from_dict(dict_report)
+
+    # drop unnecessary rows and columns
+    try :
+        report_df = report_df.drop(['accuracy', 'macro avg', 'weighted avg'], axis=1)
+    except KeyError:
+        print(dict_report)
+        report_df = report_df.drop(['micro avg', 'macro avg', 'weighted avg'], axis=1)
+
+    report_df = report_df.drop(['support'], axis=0)
+
+    return report_df
 
 
 def create_raster_sampleimage(sample_vector, reference_raster, output_path, attribute):
