@@ -56,7 +56,7 @@ out_std_deviation_csv = os.path.join(out_classif_folder, 'std_deviation.csv')
 out_mean_csv = os.path.join(out_classif_folder, 'mean.csv')
 
 # Sample parameters
-nb_iter = 2
+nb_iter = 30
 
 logging.info("Création du raster Sample")
 create_raster_sampleimage(sample_filename, image_reference, raster_sample_filename, "Code")
@@ -70,16 +70,22 @@ X, Y, t = cla.get_samples_from_roi(image_filename, raster_sample_filename)
 logging.info("Obtention des groupes")
 _, groups, _ = cla.get_samples_from_roi(image_filename, raster_sample_id_filename)
 
-# Valeurs à remplacer
-values_to_replace = [15, 16, 26, 27, 28, 29]
+# Valeurs à supprimer
+values_to_delete = [15, 16, 26, 27, 28, 29]
 
-# Remplacement
-Y[np.isin(Y, values_to_replace)] = 0
+# suppression
+Index_Essence_to_Delete = np.where(np.isin(Y, values_to_delete))
+
+Y_skf = np.delete(Y, Index_Essence_to_Delete, 0)
+X_skf = np.delete(X, Index_Essence_to_Delete, 0)
+groups = np.delete(groups, Index_Essence_to_Delete, 0)
 
 list_cm = []
 list_accuracy = []
 list_report = []
+print(f"groups : {groups.shape}")
 groups = np.squeeze(groups)
+print(f"groups : {groups.shape}")
 
 # Iter on stratified K fold
 logging.info("Création des Kfolds Stratifiés")
@@ -94,23 +100,17 @@ clf = RF(max_depth=max_depth,
         class_weight=class_weight,
         max_samples=max_samples)
 
-for i, (train, test) in enumerate(skf.split(X, Y)):
+for i, (train, test) in enumerate(skf.split(X_skf, Y_skf)):
     logging.info(f"Itération {i}")
-    X_train, X_test = X[train], X[test]
-    Y_train, Y_test = Y[train], Y[test]
+    X_train, X_test = X_skf[train], X_skf[test]
+    Y_train, Y_test = Y_skf[train], Y_skf[test]
 
     # 3 --- Train
-    print(f"dimension X_Train : {X_train.shape}")
-    print(f"dimension Y_Train : {Y_train.shape}")
-    print(f"dimension X : {X.shape}")
-    print(f"dimension Y : {Y.shape}")
     Y_train = np.ravel(Y_train)
-    print(f"dimension Y_Train : {Y_train.shape}")
 
     clf.fit(X_train, Y_train)
 
     # 4 --- Test
-    print("B")
     Y_predict = clf.predict(X_test)
 
     # compute quality
@@ -121,7 +121,6 @@ for i, (train, test) in enumerate(skf.split(X, Y)):
 
     # store them
     list_report.append(report_from_dict_to_df(report))
-    print("C")
 
 logging.info("Sauvegarde des résultats")
 # compute mean of cm
