@@ -36,7 +36,7 @@ classif_filename = os.path.join(classif_folder, 'carte_essences_echelle_pixel.ti
 
 # pixel_surf = pixel_width * pixel_height
 pixel_surf = 100
-pourcentage_categorie = 0.75
+pourcentage_categorie = 75.0
 surf_mini = 20000
 feuillus_ilots = 16
 melange_feuillus = 15
@@ -51,10 +51,14 @@ gdf_sample = gpd.read_file(sample_filename)
 stats = zonal_stats(
     gdf_sample,
     classif_filename,
-    categorical=True  # Active la table de fréquences par catégorie
+    all_touched = True,
+    categorical = True  # Active la table de fréquences par catégorie
 )
 
 code_predict = [] 
+code_surface = []
+code_percent_conif = []
+code_percent_feuil = []
 for i, zone_stats in enumerate(stats):
     total_pixels = sum(zone_stats.values())
     
@@ -68,6 +72,7 @@ for i, zone_stats in enumerate(stats):
         elif category > 20 and category < 26 :
             pourcentage_coniferes += percentage
     
+    surface = total_pixels * pixel_surf
     if (total_pixels * pixel_surf) < surf_mini :
         if pourcentage_feuillus > pourcentage_categorie :
             peuplement = feuillus_ilots
@@ -77,9 +82,18 @@ for i, zone_stats in enumerate(stats):
             peuplement = melange_feuillus
     elif pourcentage_coniferes > pourcentage_categorie :
             peuplement = melange_coniferes
-    else :
-        peuplement = melange_conif_prep_feuil if pourcentage_coniferes > pourcentage_feuillus else melange_feuil_prep_conif     
+    elif pourcentage_coniferes > pourcentage_feuillus :
+            peuplement = melange_conif_prep_feuil
+    elif (pourcentage_coniferes <= pourcentage_feuillus) and (pourcentage_coniferes !=0):
+            melange_feuil_prep_conif     
     code_predict.append(peuplement)
+    code_surface.append(surface)
+    code_percent_conif.append(pourcentage_coniferes)
+    code_percent_feuil.append(pourcentage_feuillus)
+    
 gdf_sample.insert(7,"code_predit", code_predict)
+gdf_sample.insert(8,"surface", code_surface)
+gdf_sample.insert(9, "taux feuil", code_percent_feuil)
+gdf_sample.insert(10, "taux conif", code_percent_conif)
 gdf_sample.to_file("groupe_9/results/data/sample/test.shp")
     
