@@ -17,7 +17,7 @@ import sys
 import logging
 import time
 import numpy as np
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, classification_report, \
     accuracy_score
 from sklearn.ensemble import RandomForestClassifier as RF
@@ -57,6 +57,7 @@ out_mean_csv = os.path.join(out_classif_folder, 'mean.csv')
 
 # Sample parameters
 nb_iter = 30
+nb_folds = 5
 
 logging.info("Création du raster Sample")
 create_raster_sampleimage(sample_filename, image_reference, raster_sample_filename, "Code")
@@ -83,13 +84,9 @@ groups = np.delete(groups, Index_Essence_to_Delete, 0)
 list_cm = []
 list_accuracy = []
 list_report = []
-print(f"groups : {groups.shape}")
 groups = np.squeeze(groups)
-print(f"groups : {groups.shape}")
 
 # Iter on stratified K fold
-logging.info("Création des Kfolds Stratifiés")
-skf = StratifiedKFold(n_splits=nb_iter)
 logging.info(f"Entrainement sur tous les Kfolds avec {nb_iter} itérations")
 max_depth = 50
 oob_score = True
@@ -100,27 +97,32 @@ clf = RF(max_depth=max_depth,
         class_weight=class_weight,
         max_samples=max_samples)
 
-for i, (train, test) in enumerate(skf.split(X_skf, Y_skf)):
-    logging.info(f"Itération {i}")
-    X_train, X_test = X_skf[train], X_skf[test]
-    Y_train, Y_test = Y_skf[train], Y_skf[test]
+# Iter on stratified K fold
+for iteration in range(nb_iter):
+    logging.info(f"Iteration principal : {iteration + 1} : Création des Kfolds Stratifiés")
+    skf = StratifiedGroupKFold(n_splits=nb_folds, shuffle=True)
 
-    # 3 --- Train
-    Y_train = np.ravel(Y_train)
+    for i, (train, test) in enumerate(skf.split(X_skf, Y_skf, groups=groups)):
+        logging.info(f"Itération kfold : {i + 1}")
+        X_train, X_test = X_skf[train], X_skf[test]
+        Y_train, Y_test = Y_skf[train], Y_skf[test]
 
-    clf.fit(X_train, Y_train)
+        # 3 --- Train
+        Y_train = np.ravel(Y_train)
 
-    # 4 --- Test
-    Y_predict = clf.predict(X_test)
+        clf.fit(X_train, Y_train)
 
-    # compute quality
-    list_cm.append(confusion_matrix(Y_test, Y_predict))
-    list_accuracy.append(accuracy_score(Y_test, Y_predict))
-    report = classification_report(Y_test, Y_predict,
-                                   labels=np.unique(Y_predict), output_dict=True)
+        # 4 --- Test
+        Y_predict = clf.predict(X_test)
 
-    # store them
-    list_report.append(report_from_dict_to_df(report))
+        # compute quality
+        list_cm.append(confusion_matrix(Y_test, Y_predict))
+        list_accuracy.append(accuracy_score(Y_test, Y_predict))
+        report = classification_report(Y_test, Y_predict,
+                                        labels=np.unique(Y_predict), output_dict=True)
+
+        # store them
+        list_report.append(report_from_dict_to_df(report))
 
 logging.info("Sauvegarde des résultats")
 # compute mean of cm
@@ -155,7 +157,6 @@ plots.plot_mean_class_quality(list_report, list_accuracy, out_std_dev_mean)
 
 logging.info("Prédiction sur toute la zone")
 Y_predict = clf.predict(X)
-print(np.unique(Y_predict))
 
 # reshape
 logging.info("Sauvegarde de la nouvelle Carte")
