@@ -45,6 +45,8 @@ melange_coniferes = 26
 melange_conif_prep_feuil = 28
 melange_feuil_prep_conif = 29
 
+np_pourcentage_categorie = np.zeros((26,2), dtype=float)
+
 gdf_sample = gpd.read_file(sample_filename)
 
 # Calcul des statistiques catégoriques
@@ -65,11 +67,15 @@ for i, zone_stats in enumerate(stats):
     pourcentage_feuillus = 0
     pourcentage_coniferes = 0
     peuplement = 0
+    np_pourcentage_categorie[np_pourcentage_categorie > 0.0] = 0.0
+    
     for category, count in zone_stats.items():
-        percentage = (count / total_pixels) * 100
+        percentage = (count / total_pixels) * 100.0
         if category > 10 and category < 15 :
+            np_pourcentage_categorie[int(category), 0] += percentage
             pourcentage_feuillus += percentage
         elif category > 20 and category < 26 :
+            np_pourcentage_categorie[int(category), 1] += percentage
             pourcentage_coniferes += percentage
     
     surface = total_pixels * pixel_surf
@@ -78,19 +84,32 @@ for i, zone_stats in enumerate(stats):
             peuplement = feuillus_ilots
         elif pourcentage_coniferes > pourcentage_categorie :
             peuplement = coniferes_ilots
-    elif pourcentage_feuillus > pourcentage_categorie :
-            peuplement = melange_feuillus
-    elif pourcentage_coniferes > pourcentage_categorie :
-            peuplement = melange_coniferes
-    elif pourcentage_coniferes > pourcentage_feuillus :
-            peuplement = melange_conif_prep_feuil
-    elif (pourcentage_coniferes <= pourcentage_feuillus) and (pourcentage_coniferes !=0):
-            melange_feuil_prep_conif     
+        elif pourcentage_coniferes > pourcentage_feuillus :
+                peuplement = melange_conif_prep_feuil
+        elif (pourcentage_coniferes < pourcentage_feuillus) :
+                peuplement = melange_feuil_prep_conif   
+    else : 
+        indice_feuil = np_pourcentage_categorie[0].argmax()
+        indice_conif = np_pourcentage_categorie[1].argmax()
+        
+        if  indice_feuil > indice_conif :
+            peuplement = indice_feuil
+        elif indice_conif > indice_feuil :
+            peuplement = indice_conif
+        elif pourcentage_feuillus > pourcentage_categorie :
+                peuplement = melange_feuillus
+        elif pourcentage_coniferes > pourcentage_categorie :
+                peuplement = melange_coniferes
+        elif pourcentage_coniferes > pourcentage_feuillus :
+                peuplement = melange_conif_prep_feuil
+        elif (pourcentage_coniferes < pourcentage_feuillus) :
+                peuplement = melange_feuil_prep_conif   
+                  
     code_predict.append(peuplement)
     code_surface.append(surface)
     code_percent_conif.append(pourcentage_coniferes)
     code_percent_feuil.append(pourcentage_feuillus)
-    
+
 gdf_sample.insert(7,"code_predit", code_predict)
 gdf_sample.insert(8,"surface", code_surface)
 gdf_sample.insert(9, "taux feuil", code_percent_feuil)
