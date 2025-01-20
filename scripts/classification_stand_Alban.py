@@ -92,9 +92,9 @@ for i, zone_stats in enumerate(stats):
         indice_feuil = np_pourcentage_categorie[0].argmax()
         indice_conif = np_pourcentage_categorie[1].argmax()
         
-        if  indice_feuil > indice_conif :
+        if  np_pourcentage_categorie[indice_feuil, 0] > pourcentage_categorie :            
             peuplement = indice_feuil
-        elif indice_conif > indice_feuil :
+        elif np_pourcentage_categorie[indice_conif, 0] > pourcentage_categorie :
             peuplement = indice_conif
         elif pourcentage_feuillus > pourcentage_categorie :
                 peuplement = melange_feuillus
