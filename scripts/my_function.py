@@ -349,7 +349,7 @@ def get_raster_properties(dataset):
     return pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs
 
 
-def reproject_raster(input_raster, target_srs, x_res=10, y_res=10, resample_alg="bilinear"):
+def reproject_raster(input_raster, target_srs, x_res=10, y_res=10, resample_alg="near"):
     """
     Reprojette un raster vers un système de coordonnées cible en mémoire avec une résolution spécifiée.
 
@@ -579,7 +579,7 @@ def resample_raster(input_raster, pixel_size):
         logger.info(
             f"Rééchantillonnage du raster à une taille de pixel : {pixel_size}")
         resampled = gdal.Warp('', input_raster, format="MEM",
-                              xRes=pixel_size, yRes=pixel_size, resampleAlg="bilinear")
+                              xRes=pixel_size, yRes=pixel_size, resampleAlg="near")
         if resampled is None:
             log_error_and_raise("Échec du rééchantillonnage du raster.")
         return resampled
