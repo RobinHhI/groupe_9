@@ -20,6 +20,10 @@ Modifications récentes :
 - Adaptation des fonctions de calcul de distances pour travailler avec des données 2D.
 """
 
+from osgeo import gdal, ogr
+from my_function import get_raster_properties
+from osgeo import ogr
+from osgeo import gdal
 import os
 import logging
 import sys
@@ -56,30 +60,6 @@ def log_error_and_raise(message, exception=RuntimeError):
     """
     logger.error(f"{message}\n{traceback.format_exc()}")
     raise exception(message)
-
-
-def cleanup_temp_files(*base_file_paths):
-    """
-    Supprime les fichiers temporaires spécifiés avec toutes leurs extensions associées.
-
-    Paramètres :
-    -----------
-    *base_file_paths : str
-        Chemins de base des fichiers à supprimer (sans extension spécifique).
-        Ex : "temp_classes_dissolues" supprimera tous les fichiers "temp_classes_dissolues.*".
-    """
-    extensions = [".shp", ".shx", ".dbf", ".prj",
-                  ".cpg", ".qpj", ".fix", ".shp.xml"]
-    for base_path in base_file_paths:
-        for ext in extensions:
-            file_path = f"{base_path}{ext}"
-            try:
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-                    logger.info(f"Fichier temporaire supprimé : {file_path}")
-            except Exception as e:
-                logger.error(
-                    f"Erreur lors de la suppression du fichier {file_path} : {e}")
 
 
 def extraire_valeurs_ndvi_par_classe(shapefile_path, raster_path, groupes):
@@ -471,3 +451,184 @@ def plot_violin_distance_polygons(distances_par_polygone, classes_polygones, out
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
     logger.info(f"Graphique sauvegardé : {output_path}")
+
+
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+# ================================= ## ================================= ## ================================= #
+
+
+def cleanup_temp_files(*base_file_paths):
+    """
+    Supprime les fichiers temporaires spécifiés avec toutes leurs extensions associées.
+
+    Cette fonction supprime les fichiers associés à des shapefiles (ou d'autres formats similaires)
+    en supprimant toutes les extensions associées à un chemin de base donné.
+
+    Paramètres :
+    -----------
+    *base_file_paths : str
+        Chemins de base des fichiers à supprimer (sans extension spécifique).
+        Ex : "temp_classes_dissolues" supprimera tous les fichiers "temp_classes_dissolues.*".
+
+    Retours :
+    ---------
+    Aucun. Les fichiers temporaires sont supprimés, et les erreurs éventuelles sont enregistrées.
+    """
+    extensions = [
+        ".shp", ".shx", ".dbf", ".prj", ".cpg", ".qpj", ".fix", ".shp.xml"
+    ]  # Extensions associées aux shapefiles et fichiers temporaires
+
+    for base_path in base_file_paths:
+        if not base_path or not isinstance(base_path, str):
+            logging.warning(f"Chemin de base invalide : {base_path}")
+            continue
+
+        for ext in extensions:
+            file_path = f"{base_path}{ext}"
+            try:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logging.info(f"Fichier temporaire supprimé : {file_path}")
+                else:
+                    logging.debug(
+                        f"Fichier non trouvé (aucune action nécessaire) : {file_path}")
+            except Exception as e:
+                logging.error(
+                    f"Erreur lors de la suppression du fichier {file_path} : {e}"
+                )
+
+
+def report_from_dict_to_df(dict_report):
+    """
+    Convertit un rapport de classification en un DataFrame Pandas.
+
+    Cette fonction prend un dictionnaire généré par un rapport
+    de classification (issu de `classification_report` de scikit-learn),
+    le transforme en DataFrame et élimine les colonnes et lignes non pertinentes.
+
+    Paramètres :
+    ------------
+    dict_report : dict
+        Le dictionnaire contenant les métriques du rapport de classification.
+
+    Retours :
+    ---------
+    report_df : pandas.DataFrame
+        Un DataFrame contenant uniquement les métriques par classe (précision, rappel, F1).
+
+    Exceptions :
+    ------------
+    Retourne un DataFrame vide si l'entrée est invalide.
+    """
+    try:
+        # Conversion du dictionnaire en DataFrame
+        report_df = pd.DataFrame.from_dict(dict_report)
+
+        # Vérifier et supprimer les colonnes non pertinentes si elles existent
+        cols_to_drop = ['accuracy', 'macro avg', 'weighted avg', 'micro avg']
+        for col in cols_to_drop:
+            if col in report_df.columns:
+                report_df.drop(columns=col, inplace=True)
+
+        # Vérifier et supprimer la ligne "support" si elle existe
+        if 'support' in report_df.index:
+            report_df.drop(index='support', inplace=True)
+
+        # Retourner le DataFrame nettoyé
+        return report_df
+
+    except Exception as e:
+        logging.warning(f"Erreur lors de la conversion du rapport : {e}")
+        return pd.DataFrame()  # Retourne un DataFrame vide en cas d'erreur
+
+
+def create_raster_sampleimage(sample_vector, reference_raster, output_path, attribute):
+    """
+    Crée un raster d'échantillonnage à partir d'un vecteur et d'un raster de référence.
+
+    Cette fonction génère un raster en utilisant un vecteur d'échantillons 
+    et un raster de référence, en rasterisant selon un attribut donné.
+
+    Paramètres :
+    ------------
+    sample_vector : str
+        Chemin vers le fichier vecteur contenant les échantillons.
+    reference_raster : str
+        Chemin vers le raster de référence définissant la géométrie et la projection.
+    output_path : str
+        Chemin pour sauvegarder le raster de sortie.
+    attribute : str
+        Nom de l'attribut dans le vecteur à utiliser pour la rasterisation.
+
+    Retours :
+    ---------
+    Aucun. Un fichier raster est généré à l'emplacement `output_path`.
+
+    Exceptions :
+    ------------
+    Lève une exception si le fichier vecteur ou raster de référence ne peut pas être ouvert,
+    ou si la rasterisation échoue.
+    """
+    try:
+        # Vérifier l'existence des fichiers d'entrée
+        if not os.path.exists(sample_vector):
+            raise FileNotFoundError(
+                f"Fichier vecteur introuvable : {sample_vector}")
+        if not os.path.exists(reference_raster):
+            raise FileNotFoundError(
+                f"Raster de référence introuvable : {reference_raster}")
+
+        # Ouvrir le raster de référence
+        ref_ds = gdal.Open(reference_raster, gdal.GA_ReadOnly)
+        if ref_ds is None:
+            raise RuntimeError(
+                f"Impossible d'ouvrir le raster de référence : {reference_raster}")
+
+        # Extraire les propriétés du raster de référence
+        geo_transform = ref_ds.GetGeoTransform()
+        projection = ref_ds.GetProjection()
+        x_pixels = ref_ds.RasterXSize
+        y_pixels = ref_ds.RasterYSize
+
+        # Déterminer le type de données pour le raster de sortie
+        raster_dtype = gdal.GDT_UInt16 if attribute.lower() == "id" else gdal.GDT_Byte
+
+        # Créer un raster en mémoire
+        out_raster = gdal.GetDriverByName("MEM").Create(
+            "", x_pixels, y_pixels, 1, raster_dtype
+        )
+        out_raster.SetGeoTransform(geo_transform)
+        out_raster.SetProjection(projection)
+        out_band = out_raster.GetRasterBand(1)
+        out_band.SetNoDataValue(0)  # NoData = 0
+        out_band.Fill(0)  # Remplir avec la valeur NoData
+
+        # Ouvrir le vecteur
+        vector_ds = gdal.OpenEx(sample_vector, gdal.OF_VECTOR)
+        if vector_ds is None:
+            raise RuntimeError(
+                f"Impossible d'ouvrir le fichier vecteur : {sample_vector}")
+        vector_layer = vector_ds.GetLayer()
+
+        # Rasteriser le vecteur
+        options = [f"ATTRIBUTE={attribute}"]
+        gdal.RasterizeLayer(out_raster, [1], vector_layer, options=options)
+
+        # Sauvegarder le raster sur disque
+        driver = gdal.GetDriverByName("GTiff")
+        driver.CreateCopy(output_path, out_raster, options=["COMPRESS=LZW"])
+
+        logging.info(
+            f"Raster d'échantillonnage créé avec succès : {output_path}")
+
+    except Exception as e:
+        logging.error(
+            f"Erreur lors de la création du raster d'échantillonnage : {e}")
+        raise
