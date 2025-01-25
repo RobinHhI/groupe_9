@@ -73,6 +73,7 @@ _, groups, _ = cla.get_samples_from_roi(image_filename, raster_sample_id_filenam
 
 # Valeurs à supprimer
 values_to_delete = [15, 16, 26, 27, 28, 29]
+essence_tree = [11, 12, 13, 14, 21, 22, 23, 24, 25]
 
 # suppression
 Index_Essence_to_Delete = np.where(np.isin(Y, values_to_delete))
@@ -89,11 +90,13 @@ groups = np.squeeze(groups)
 # Iter on stratified K fold
 logging.info(f"Entrainement sur tous les Kfolds avec {nb_iter} itérations")
 max_depth = 50
+n_jobs = 50
 oob_score = True
 max_samples = 0.75
 class_weight = "balanced"
 clf = RF(max_depth=max_depth,
         oob_score=oob_score,
+        n_jobs=n_jobs,
         class_weight=class_weight,
         max_samples=max_samples)
 
@@ -107,15 +110,17 @@ for iteration in range(nb_iter):
         X_train, X_test = X_skf[train], X_skf[test]
         Y_train, Y_test = Y_skf[train], Y_skf[test]
 
+        # vérfie si une essence d'arbre est absente dans le jeu de test
+        if not np.array_equal(np.unique(Y_test), np.array(essence_tree)):
+            continue
+
         # 3 --- Train
         Y_train = np.ravel(Y_train)
-
         clf.fit(X_train, Y_train)
 
         # 4 --- Test
         Y_predict = clf.predict(X_test)
 
-        # compute quality
         list_cm.append(confusion_matrix(Y_test, Y_predict))
         list_accuracy.append(accuracy_score(Y_test, Y_predict))
         report = classification_report(Y_test, Y_predict,
