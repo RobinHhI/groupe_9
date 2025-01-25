@@ -54,7 +54,8 @@ stats = zonal_stats(
     gdf_sample,
     classif_filename,
     all_touched = True,
-    categorical = True  # Active la table de fréquences par catégorie
+    categorical = True,  # Active la table de fréquences par catégorie
+    nodata = 0
 )
 
 code_predict = [] 
@@ -110,9 +111,16 @@ for i, zone_stats in enumerate(stats):
     code_percent_conif.append(pourcentage_coniferes)
     code_percent_feuil.append(pourcentage_feuillus)
 
-gdf_sample.insert(7,"code_predit", code_predict)
-gdf_sample.insert(8,"surface", code_surface)
-gdf_sample.insert(9, "taux feuil", code_percent_feuil)
-gdf_sample.insert(10, "taux conif", code_percent_conif)
-gdf_sample.to_file("groupe_9/results/data/sample/test.shp")
+column_exist = gdf_sample.get(["code_predi"])
+
+if column_exist is not None : 
+    gdf_sample = gdf_sample.drop(column_exist, axis=1)
+
+gdf_sample.insert(7,"code_predit", code_predict)   
+                        
+#gdf_sample.insert(8,"surface", code_surface)
+#gdf_sample.insert(9, "taux_feuil", code_percent_feuil)
+#gdf_sample.insert(10, "taux_conif", code_percent_conif)
+#gdf_sample.to_file("groupe_9/results/data/sample/test.shp")    
+gdf_sample.to_file(sample_filename)
     
