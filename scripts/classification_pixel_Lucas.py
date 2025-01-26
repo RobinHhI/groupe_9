@@ -43,7 +43,7 @@ from sklearn.metrics import confusion_matrix, classification_report, accuracy_sc
 sys.path.append('libsigma')  # noqa
 import classification as cla
 import read_and_write as rw
-import plots
+from plots import plot_cm
 
 from my_function_lucas import cleanup_temp_files, create_raster_sampleimage, report_from_dict_to_df
 
@@ -177,7 +177,7 @@ if X_f.shape[0] == 0:
     raise ValueError("Plus aucun pixel disponible après le filtrage !")
 
 # # ---------------------------------------------------------------------------
-# # 6) Sous-échantillonnage de la classe majoritaire (12 => Chêne)
+# # BIS Sous-échantillonnage de la classe majoritaire (12 => Chêne)
 # # ---------------------------------------------------------------------------
 # # Ex. on garde max 100000 pixels de la classe 12
 # taille_chene_visee = 100_000
@@ -205,7 +205,7 @@ if X_f.shape[0] == 0:
 #     f"Formes après undersampling: X={X_f.shape}, Y={Y_f.shape}, G={G_f.shape}")
 
 # ---------------------------------------------------------------------------
-# 7) Configuration du RandomForest + validation croisée
+# 6) Configuration du RandomForest + validation croisée
 # ---------------------------------------------------------------------------
 clf = RF(
     max_depth=max_depth,
@@ -268,7 +268,7 @@ for repetition in range(nb_iter):
                  f"{int(rep_minutes)} min et {rep_seconds:.2f} s. ***")
 
 # ---------------------------------------------------------------------------
-# 8) Calcul et figures
+# 7) Calcul et figures
 # ---------------------------------------------------------------------------
 arr_acc = np.array(list_acc)  # Liste des accuracies de chaque fold
 mean_accuracy = arr_acc.mean()  # Moyenne des accuracies
@@ -323,7 +323,31 @@ finally:
     print("Fichiers temporaires supprimés.")
 
 # ---------------------------------------------------------------------------
-# 9) Apprentissage final sur X_f + prediction sur X_orig
+# 7-bis) Sauvegarde d'une matrice de confusion moyenne
+# ---------------------------------------------------------------------------
+# Calcul de la matrice de confusion moyenne
+# shape = (nb_folds_total, n_classes, n_classes)
+arr_cm = np.stack(list_cm, axis=0)
+mean_cm = arr_cm.mean(axis=0)       # moyenne sur l'axe des folds
+mean_cm = mean_cm.astype(int)
+
+# la liste des étiquettes (classes) uniques
+labels_list = labels_uniques.tolist()
+out_cm_pixel = os.path.join(
+    out_classif_folder, "confusion_matrix_pixel_mean.png")
+
+# Utilisation de la fonction plot_cm pour tracer/sauvegarder
+plot_cm(
+    mean_cm,
+    labels=labels_list,
+    out_filename=out_cm_pixel,
+    normalize=False,   # ou True pour la normaliser en pourcentage
+    cmap="Blues"
+)
+logging.info(f"Matrice de confusion moyenne sauvegardée : {out_cm_pixel}")
+
+# ---------------------------------------------------------------------------
+# 8) Apprentissage final sur X_f + prediction sur X_orig
 # ---------------------------------------------------------------------------
 logging.info("Apprentissage final sur X_f (filtré).")
 clf.fit(X_f, Y_f)

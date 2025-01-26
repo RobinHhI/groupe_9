@@ -20,10 +20,10 @@ Modifications récentes :
 - Adaptation des fonctions de calcul de distances pour travailler avec des données 2D.
 """
 
-from osgeo import gdal, ogr
-from my_function import get_raster_properties
-from osgeo import ogr
 from osgeo import gdal
+from rasterstats import zonal_stats
+from osgeo import gdal, ogr
+import time
 import os
 import logging
 import sys
@@ -34,6 +34,8 @@ import geopandas as gpd
 from osgeo import gdal, ogr, osr
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D  # Créer des lignes dans la légende
+
+from my_function import get_raster_properties  # noqa
 
 # GDAL configuration
 gdal.UseExceptions()
@@ -632,3 +634,241 @@ def create_raster_sampleimage(sample_vector, reference_raster, output_path, attr
         logging.error(
             f"Erreur lors de la création du raster d'échantillonnage : {e}")
         raise
+
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+my_function_stand.py
+
+Ce script contient des fonctions utilitaires pour la classification à l'échelle
+des peuplements forestiers.
+
+Auteur : [Votre Nom]
+Date : 31 janvier 2025
+"""
+
+
+def compute_zonal_statistics(gdf, raster_path, all_touched=True, nodata=0):
+    """
+    Calcule les statistiques zonales (catégorielles) pour chaque polygone d'un
+    GeoDataFrame, en utilisant la bibliothèque rasterstats.
+
+    Paramètres
+    ----------
+    gdf : geopandas.GeoDataFrame
+        Le GeoDataFrame représentant les polygones (ex. BD forêt).
+    raster_path : str
+        Chemin vers le fichier raster (carte des essences) sur lequel faire
+        les statistiques zonales.
+    all_touched : bool, optionnel
+        Indique si on inclut les pixels même s'ils ne sont que partiellement
+        recouverts par le polygone. Par défaut True.
+    nodata : int, optionnel
+        Valeur NoData dans le raster, par défaut 0.
+
+    Retourne
+    -------
+    stats_zonales : list of dict
+        Liste de dictionnaires, chaque dictionnaire contient les comptes
+        de chaque classe pour le polygone correspondant.
+    """
+    stats_zonales = zonal_stats(
+        gdf,
+        raster_path,
+        all_touched=all_touched,
+        categorical=True,
+        nodata=nodata
+    )
+    return stats_zonales
+
+
+def get_pixel_area(raster_path):
+    """
+    Renvoie la surface d'un pixel (en m²) à partir de la géotransformation
+    du raster.
+
+    Paramètres
+    ----------
+    raster_path : str
+        Chemin vers le fichier raster.
+
+    Retourne
+    -------
+    float
+        Surface d'un pixel en m².
+    """
+    raster = gdal.Open(raster_path)
+    if raster is None:
+        raise FileNotFoundError(
+            f"Impossible d'ouvrir le raster : {raster_path}")
+
+    geo_transform = raster.GetGeoTransform()
+    # Taille du pixel
+    pixel_width = abs(geo_transform[1])
+    pixel_height = abs(geo_transform[5])
+    pixel_surface = pixel_width * pixel_height
+    raster = None  # fermeture
+    return pixel_surface
+
+
+def classify_peuplement_feuillus_coniferes(pourcentage_feuillus,
+                                           pourcentage_coniferes,
+                                           seuil,
+                                           surf,
+                                           surf_mini,
+                                           feuillus_ilots,
+                                           coniferes_ilots,
+                                           melange_feuillus,
+                                           melange_coniferes,
+                                           melange_conif_prep_feuil,
+                                           melange_feuil_prep_conif):
+    """
+    Classifie un polygone en fonction des pourcentages de feuillus/conifères et
+    de sa superficie, selon les règles de décision décrites dans la consigne.
+
+    Paramètres
+    ----------
+    pourcentage_feuillus : float
+        Pourcentage de feuillus dans le polygone.
+    pourcentage_coniferes : float
+        Pourcentage de conifères dans le polygone.
+    seuil : float
+        Seuil de pourcentage pour catégoriser majoritairement feuillu ou conifère.
+    surf : float
+        Superficie totale du polygone (m²).
+    surf_mini : float
+        Seuil de superficie pour différencier petits îlots et grands polygones.
+    feuillus_ilots : int
+        Code de classe pour "îlots feuillus".
+    coniferes_ilots : int
+        Code de classe pour "îlots conifères".
+    melange_feuillus : int
+        Code de classe pour "peuplement feuillus" (mélange).
+    melange_coniferes : int
+        Code de classe pour "peuplement conifères" (mélange).
+    melange_conif_prep_feuil : int
+        Code de classe pour "mélange conifères à prédominance feuillus".
+    melange_feuil_prep_conif : int
+        Code de classe pour "mélange feuillus à prédominance conifères".
+
+    Retourne
+    -------
+    int
+        Code correspondant à la classe attribuée.
+    """
+    if surf < surf_mini:
+        # Petits îlots
+        if pourcentage_feuillus > seuil:
+            return feuillus_ilots
+        elif pourcentage_coniferes > seuil:
+            return coniferes_ilots
+        elif pourcentage_coniferes > pourcentage_feuillus:
+            return melange_conif_prep_feuil
+        else:
+            return melange_feuil_prep_conif
+    else:
+        # Grands polygones
+        if pourcentage_feuillus > seuil:
+            return melange_feuillus
+        elif pourcentage_coniferes > seuil:
+            return melange_coniferes
+        elif pourcentage_coniferes > pourcentage_feuillus:
+            return melange_conif_prep_feuil
+        else:
+            return melange_feuil_prep_conif
+
+
+def compute_peuplement_class(stats_zonales,
+                             pixel_surface,
+                             seuil_categorie,
+                             surface_mini,
+                             codes_peuplement):
+    """
+    À partir des statistiques zonales et du code de classification,
+    calcule la classe de peuplement pour chaque polygone.
+
+    Paramètres
+    ----------
+    stats_zonales : list of dict
+        Sortie de la fonction compute_zonal_statistics().
+    pixel_surface : float
+        Surface d'un pixel (m²).
+    seuil_categorie : float
+        Seuil pour distinguer majoritairement feuillus ou conifères (en %).
+    surface_mini : float
+        Seuil de superficie pour différencier les petits îlots des grands polygones.
+    codes_peuplement : dict
+        Dictionnaire contenant les codes de classes (ex. "feuillus_ilots": 16, etc.).
+
+    Retourne
+    -------
+    classes_predites : list of int
+        Liste des classes prédites (une par polygone).
+    percentages_feuillus : list of float
+        Liste des pourcentages feuillus.
+    percentages_coniferes : list of float
+        Liste des pourcentages conifères.
+    surfaces : list of float
+        Liste des surfaces des polygones (m²).
+    """
+    classes_predites = []
+    percentages_feuillus = []
+    percentages_coniferes = []
+    surfaces = []
+
+    # Récupération des différents codes
+    feuillus_ilots = codes_peuplement["feuillus_ilots"]
+    melange_feuillus = codes_peuplement["melange_feuillus"]
+    coniferes_ilots = codes_peuplement["coniferes_ilots"]
+    melange_coniferes = codes_peuplement["melange_coniferes"]
+    melange_conif_prep_feuil = codes_peuplement["melange_conif_prep_feuil"]
+    melange_feuil_prep_conif = codes_peuplement["melange_feuil_prep_conif"]
+
+    # Pour chaque polygone
+    for stats_poly in stats_zonales:
+        total_pixels = sum(stats_poly.values())
+        # Éviter la division par zéro
+        if total_pixels == 0:
+            classes_predites.append(0)  # ou un code "inconnu"
+            percentages_feuillus.append(0)
+            percentages_coniferes.append(0)
+            surfaces.append(0)
+            continue
+
+        # Pourcentage de feuillus (ex. classes entre 11 et 14, selon votre nomenclature)
+        pourcentage_feuillus = sum(
+            (count / total_pixels) * 100
+            for cat, count in stats_poly.items()
+            # Exemple : classes feuillus = 11,12,13,14 -> adapter selon vos codes
+            if 10 < int(cat) < 15
+        )
+        # Pourcentage de conifères (ex. classes entre 21 et 25)
+        pourcentage_coniferes = sum(
+            (count / total_pixels) * 100
+            for cat, count in stats_poly.items()
+            if 20 < int(cat) < 26
+        )
+        surface_poly = total_pixels * pixel_surface
+
+        # Classification via la fonction
+        classe_predite = classify_peuplement_feuillus_coniferes(
+            pourcentage_feuillus,
+            pourcentage_coniferes,
+            seuil_categorie,
+            surface_poly,
+            surface_mini,
+            feuillus_ilots,
+            coniferes_ilots,
+            melange_feuillus,
+            melange_coniferes,
+            melange_conif_prep_feuil,
+            melange_feuil_prep_conif
+        )
+
+        classes_predites.append(classe_predite)
+        percentages_feuillus.append(pourcentage_feuillus)
+        percentages_coniferes.append(pourcentage_coniferes)
+        surfaces.append(surface_poly)
+
+    return classes_predites, percentages_feuillus, percentages_coniferes, surfaces

@@ -23,7 +23,3 @@ temp_*.cpg
 
 # Fichiers de log
 log.txt
-
-# Ignorer fichiers spécifiques
-classification_stand_Lucas.py
-
