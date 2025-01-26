@@ -25,9 +25,5 @@ temp_*.cpg
 log.txt
 
 # Ignorer fichiers spécifiques
-classification_pixel_Lucas.py
-classification_pixel_Lucas_v2.py
 classification_stand_Lucas.py
 
-# Folder temporaires
-results/data/classif_v2/
