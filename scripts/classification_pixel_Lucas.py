@@ -162,7 +162,7 @@ if len(idx_excl) > 0:
     Y_f = np.delete(Y_f, idx_excl, axis=0)
     G_f = np.delete(G_f, idx_excl, axis=0)
 
-# Exclure ND=0 (ex.: se for NoData=0)
+# Exclure ND=0 (ex.: si NoData=0)
 nodata_mask = np.any(X_f == 0, axis=1)
 n_nodata = np.count_nonzero(nodata_mask)
 logging.info(f"Nombre de pixels ND=0 : {n_nodata}")
@@ -207,6 +207,9 @@ if X_f.shape[0] == 0:
 # ---------------------------------------------------------------------------
 # 6) Configuration du RandomForest + validation croisée
 # ---------------------------------------------------------------------------
+# Liste des classes attendues
+essence_tree = [11, 12, 13, 14, 21, 22, 23, 24, 25]
+
 clf = RF(
     max_depth=max_depth,
     oob_score=oob_score,
@@ -222,7 +225,6 @@ list_acc = []
 list_reports = []
 
 labels_uniques = np.unique(Y_f)
-
 logging.info(f"Validation croisée répétée : {nb_iter} x {nb_folds}")
 
 for repetition in range(nb_iter):
@@ -236,11 +238,20 @@ for repetition in range(nb_iter):
     for fold_i, (train_idx, test_idx) in enumerate(sgkf.split(X_f, Y_f, groups=G_f)):
         start_fold = time.time()
 
+        # Séparer les ensembles train/test
         logging.info(f"Fold {fold_i+1}/{nb_folds}, répétition {repetition+1}")
         X_train, X_test = X_f[train_idx], X_f[test_idx]
         Y_train, Y_test = Y_f[train_idx], Y_f[test_idx]
 
+        # Vérification des classes dans Y_test
+        if not np.array_equal(np.unique(Y_test), np.array(essence_tree)):
+            logging.warning(
+                f"Classes manquantes dans Y_test: {set(essence_tree) - set(np.unique(Y_test))}")
+            continue  # Passer à la prochaine itération
+
+        # Entraîner le modèle
         clf.fit(X_train, Y_train)
+        #  Prédire et évaluer
         Y_pred = clf.predict(X_test)
 
         # Matrice de confusion, OA, rapport
