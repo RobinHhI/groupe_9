@@ -18,10 +18,12 @@ import logging
 import time
 import numpy as np
 from sklearn.model_selection import StratifiedGroupKFold
+from sklearn.model_selection import StratifiedGroupKFold
 from sklearn.metrics import confusion_matrix, classification_report, \
     accuracy_score
 from sklearn.ensemble import RandomForestClassifier as RF
 import pandas as pd
+from osgeo import gdal
 
 sys.path.append('libsigma')
 import classification as cla
@@ -42,7 +44,7 @@ sample_folder = "groupe_9/results/data/sample"
 pretraitees_folder = "groupe_9/results/data/img_pretraitees"
 sample_filename = os.path.join(sample_folder, "Sample_BD_foret_T31TCJ.shp")
 image_reference = os.path.join(pretraitees_folder, "masque_foret.tif")
-image_filename = os.path.join(pretraitees_folder, "Serie_temp_S2_ndvi.tif")
+image_filename = os.path.join(pretraitees_folder, "Serie_temp_S2_allbands.tif")
 raster_sample_filename = os.path.join(sample_folder, "Sample_BD_foret_T31TCJ.tif")
 raster_sample_id_filename = os.path.join(sample_folder, "Sample_id_BD_foret_T31TCJ.tif")
 
@@ -57,6 +59,7 @@ out_mean_csv = os.path.join(out_classif_folder, 'mean.csv')
 
 # Sample parameters
 nb_iter = 30
+nb_folds = 5
 nb_folds = 5
 
 logging.info("Création du raster Sample")
@@ -73,6 +76,7 @@ _, groups, _ = cla.get_samples_from_roi(image_filename, raster_sample_id_filenam
 
 # Valeurs à supprimer
 values_to_delete = [15, 16, 26, 27, 28, 29]
+essence_tree = [11, 12, 13, 14, 21, 22, 23, 24, 25]
 essence_tree = [11, 12, 13, 14, 21, 22, 23, 24, 25]
 
 # suppression
@@ -91,11 +95,13 @@ groups = np.squeeze(groups)
 logging.info(f"Entrainement sur tous les Kfolds avec {nb_iter} itérations")
 max_depth = 50
 n_jobs = 50
+n_jobs = 50
 oob_score = True
 max_samples = 0.75
 class_weight = "balanced"
 clf = RF(max_depth=max_depth,
         oob_score=oob_score,
+        n_jobs=n_jobs,
         n_jobs=n_jobs,
         class_weight=class_weight,
         max_samples=max_samples)
@@ -110,7 +116,7 @@ for iteration in range(nb_iter):
         X_train, X_test = X_skf[train], X_skf[test]
         Y_train, Y_test = Y_skf[train], Y_skf[test]
 
-        # vérfie si une essence d'arbre est absente dans le jeu de test
+        # vérfie si une essence d'arbre est absent dans le jeu de test
         if not np.array_equal(np.unique(Y_test), np.array(essence_tree)):
             continue
 
@@ -120,12 +126,16 @@ for iteration in range(nb_iter):
 
         # 4 --- Test
         Y_predict = clf.predict(X_test)
+        # 4 --- Test
+        Y_predict = clf.predict(X_test)
 
         list_cm.append(confusion_matrix(Y_test, Y_predict))
         list_accuracy.append(accuracy_score(Y_test, Y_predict))
         report = classification_report(Y_test, Y_predict,
-                                        labels=np.unique(Y_predict), output_dict=True)
+                                        labels=essence_tree, output_dict=True)
 
+        # store them
+        list_report.append(report_from_dict_to_df(report))
         # store them
         list_report.append(report_from_dict_to_df(report))
 
@@ -173,6 +183,12 @@ img[t[0], t[1], 0] = Y_predict
 
 # write image
 rw.write_image(out_classif, img, data_set=ds, nb_band=1)
+
+ds = gdal.Open(out_classif,1) # The 1 means that you are opening the file to edit it)
+rb = ds.GetRasterBand(1) #assuming your raster has 1 band. 
+rb.SetNoDataValue(0)
+rb = None 
+ds = None
 
 # Fin du chronomètre pour tout le traitement
 total_end_time = time.time()
