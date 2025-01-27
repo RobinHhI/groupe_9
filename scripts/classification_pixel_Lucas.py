@@ -43,7 +43,7 @@ from sklearn.metrics import confusion_matrix, classification_report, accuracy_sc
 sys.path.append('libsigma')  # noqa
 import classification as cla
 import read_and_write as rw
-from plots import plot_cm
+from plots import plot_cm, plot_mean_class_quality
 
 from my_function_lucas import cleanup_temp_files, create_raster_sampleimage, report_from_dict_to_df
 
@@ -322,7 +322,7 @@ except Exception as e:
     logging.warning(f"Impossible de tracer la distribution d'accuracy : {e}")
 
 try:
-    plots.plot_mean_class_quality(list_reports, list_acc, out_fig_report)
+    plot_mean_class_quality(list_reports, list_acc, out_fig_report)
     logging.info(
         f"Figure plot_mean_class_quality sauvegardée : {out_fig_report}")
 except Exception as e:
