@@ -25,11 +25,11 @@ import geopandas as gpd
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 
-# Chemin vers votre librairie perso
+# Ajouter le chemin vers votre librairie personnelle
 sys.path.append('libsigma')  # noqa
 from plots import plot_cm
 
-# Import des fonctions stand
+# Importer les fonctions nécessaires
 from my_function_lucas import (
     compute_zonal_statistics,
     get_pixel_area,
@@ -44,6 +44,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
+# Enregistrement du temps de début
 start_time = time.time()
 logging.info("Début du traitement de la carte à l'échelle des peuplements.")
 
@@ -71,82 +72,107 @@ CODES_PEUPLEMENT = {
 # ---------------------------------------------------------------------------
 # 1) Lecture du raster et calcul de la surface d'un pixel
 # ---------------------------------------------------------------------------
-raster_path = CHEMINS["classification"]
-pixel_surface = get_pixel_area(raster_path)
-logging.info(f"Surface d'un pixel : {pixel_surface:.2f} m²")
+try:
+    raster_path = CHEMINS["classification"]
+    pixel_surface = get_pixel_area(raster_path)
+    logging.info(f"Surface d'un pixel : {pixel_surface:.2f} m²")
+except Exception as e:
+    logging.error(f"Erreur lors de la lecture du raster : {e}")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # 2) Lecture du shapefile et calcul des statistiques zonales
 # ---------------------------------------------------------------------------
-gdf_sample = gpd.read_file(CHEMINS["sample"])
-logging.info(
-    f"Lecture du shapefile : {CHEMINS['sample']} (taille={len(gdf_sample)})")
+try:
+    gdf_sample = gpd.read_file(CHEMINS["sample"])
+    logging.info(
+        f"Lecture du shapefile : {CHEMINS['sample']} (taille={len(gdf_sample)})")
 
-start_stats = time.time()
-stats_zonales = compute_zonal_statistics(
-    gdf=gdf_sample,
-    raster_path=raster_path,
-    all_touched=True,
-    nodata=0
-)
-end_stats = time.time()
-logging.info(
-    f"Statistiques zonales calculées en {end_stats - start_stats:.2f} s.")
+    start_stats = time.time()
+    stats_zonales = compute_zonal_statistics(
+        gdf=gdf_sample,
+        raster_path=raster_path,
+        all_touched=True,
+        nodata=0
+    )
+    end_stats = time.time()
+    logging.info(
+        f"Statistiques zonales calculées en {end_stats - start_stats:.2f} s.")
+except Exception as e:
+    logging.error(f"Erreur lors du calcul des statistiques zonales : {e}")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # 3) Attribution des classes de peuplements
 # ---------------------------------------------------------------------------
-classes_predites, pct_feu, pct_conif, surfaces = compute_peuplement_class(
-    stats_zonales=stats_zonales,
-    pixel_surface=pixel_surface,
-    seuil_categorie=SEUIL_CATEGORIE,
-    surface_mini=SURFACE_MINI,
-    codes_peuplement=CODES_PEUPLEMENT
-)
+try:
+    classes_predites, pct_feu, pct_conif, surfaces = compute_peuplement_class(
+        stats_zonales=stats_zonales,
+        pixel_surface=pixel_surface,
+        seuil_categorie=SEUIL_CATEGORIE,
+        surface_mini=SURFACE_MINI,
+        codes_peuplement=CODES_PEUPLEMENT
+    )
+except Exception as e:
+    logging.error(f"Erreur lors de l'attribution des classes : {e}")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # 4) Mise à jour du shapefile : champ "Code_pred"
 # ---------------------------------------------------------------------------
-gdf_sample["Code_pred"] = classes_predites
-
-# Mise à jour le shapefile
-gdf_sample.to_file(CHEMINS["sample"], driver="ESRI Shapefile")
-logging.info("Shapefile mis à jour avec le champ Code_pred.")
+try:
+    gdf_sample["Code_pred"] = classes_predites
+    gdf_sample.to_file(CHEMINS["sample"], driver="ESRI Shapefile")
+    logging.info("Shapefile mis à jour avec le champ Code_pred.")
+except Exception as e:
+    logging.error(f"Erreur lors de la mise à jour du shapefile : {e}")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # 5) Matrice de confusion
 # ---------------------------------------------------------------------------
-true_labels = gdf_sample["Code"].astype(int).values
-pred_labels = gdf_sample["Code_pred"].astype(int).values
+try:
+    true_labels = gdf_sample["Code"].astype(int).values
+    pred_labels = gdf_sample["Code_pred"].astype(int).values
 
-# Récupérer toutes les classes possibles (réelles + prédites)
-all_labels = sorted(np.unique(np.concatenate([true_labels, pred_labels])))
+    # Récupérer toutes les classes possibles (réelles + prédites)
+    all_labels = sorted(np.unique(np.concatenate([true_labels, pred_labels])))
 
-cm = confusion_matrix(true_labels, pred_labels, labels=all_labels)
-logging.info("Matrice de confusion calculée.")
+    cm = confusion_matrix(true_labels, pred_labels, labels=all_labels)
+    logging.info("Matrice de confusion calculée.")
 
-# Enregistrer la matrice de confusion en .CSV
-cm_df = pd.DataFrame(cm, index=all_labels, columns=all_labels)
-cm_df.to_csv(os.path.join(CLASSIF_FOLDER, "confusion_matrix_peuplements.csv"))
+    # Enregistrer la matrice de confusion en .CSV
+    cm_df = pd.DataFrame(cm, index=all_labels, columns=all_labels)
+    cm_df.to_csv(os.path.join(CLASSIF_FOLDER,
+                 "confusion_matrix_peuplements.csv"))
 
-# Faire la classification_report
-report = classification_report(
-    true_labels, pred_labels, labels=all_labels, zero_division=0
-)
-logging.info(f"Rapport de classification :\n{report}")
+    # Faire la classification_report
+    report = classification_report(
+        true_labels, pred_labels, labels=all_labels, zero_division=0
+    )
+    logging.info(f"Rapport de classification :\n{report}")
+except Exception as e:
+    logging.error(f"Erreur lors du calcul de la matrice de confusion : {e}")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # 6) Sauvegarde de la matrice de confusion
 # ---------------------------------------------------------------------------
-out_cm_path = os.path.join(CLASSIF_FOLDER, "confusion_matrix_peuplements.png")
-plot_cm(
-    cm,
-    labels=all_labels,
-    out_filename=out_cm_path,
-    normalize=False,
-    cmap="Greens"
-)
-logging.info(f"Matrice de confusion sauvegardée : {out_cm_path}")
+try:
+    out_cm_path = os.path.join(
+        CLASSIF_FOLDER, "confusion_matrix_peuplements.png")
+    plot_cm(
+        cm,
+        labels=all_labels,
+        out_filename=out_cm_path,
+        normalize=False,
+        cmap="Greens"
+    )
+    logging.info(f"Matrice de confusion sauvegardée : {out_cm_path}")
+except Exception as e:
+    logging.error(
+        f"Erreur lors de la sauvegarde de la matrice de confusion : {e}")
+    sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # Fin

@@ -35,7 +35,6 @@ from osgeo import gdal, ogr, osr
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D  # Créer des lignes dans la légende
 
-from my_function import get_raster_properties  # noqa
 
 # GDAL configuration
 gdal.UseExceptions()
@@ -636,19 +635,6 @@ def create_raster_sampleimage(sample_vector, reference_raster, output_path, attr
         raise
 
 
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-my_function_stand.py
-
-Ce script contient des fonctions utilitaires pour la classification à l'échelle
-des peuplements forestiers.
-
-Auteur : [Votre Nom]
-Date : 31 janvier 2025
-"""
-
-
 def compute_zonal_statistics(gdf, raster_path, all_touched=True, nodata=0):
     """
     Calcule les statistiques zonales (catégorielles) pour chaque polygone d'un
@@ -712,7 +698,8 @@ def get_pixel_area(raster_path):
     return pixel_surface
 
 
-def classify_peuplement_feuillus_coniferes(pourcentage_feuillus,
+def classify_peuplement_feuillus_coniferes(pourcentage_classes,
+                                           pourcentage_feuillus,
                                            pourcentage_coniferes,
                                            seuil,
                                            surf,
@@ -724,39 +711,15 @@ def classify_peuplement_feuillus_coniferes(pourcentage_feuillus,
                                            melange_conif_prep_feuil,
                                            melange_feuil_prep_conif):
     """
-    Classifie un polygone en fonction des pourcentages de feuillus/conifères et
-    de sa superficie, selon les règles de décision décrites dans la consigne.
-
-    Paramètres
-    ----------
-    pourcentage_feuillus : float
-        Pourcentage de feuillus dans le polygone.
-    pourcentage_coniferes : float
-        Pourcentage de conifères dans le polygone.
-    seuil : float
-        Seuil de pourcentage pour catégoriser majoritairement feuillu ou conifère.
-    surf : float
-        Superficie totale du polygone (m²).
-    surf_mini : float
-        Seuil de superficie pour différencier petits îlots et grands polygones.
-    feuillus_ilots : int
-        Code de classe pour "îlots feuillus".
-    coniferes_ilots : int
-        Code de classe pour "îlots conifères".
-    melange_feuillus : int
-        Code de classe pour "peuplement feuillus" (mélange).
-    melange_coniferes : int
-        Code de classe pour "peuplement conifères" (mélange).
-    melange_conif_prep_feuil : int
-        Code de classe pour "mélange conifères à prédominance feuillus".
-    melange_feuil_prep_conif : int
-        Code de classe pour "mélange feuillus à prédominance conifères".
-
-    Retourne
-    -------
-    int
-        Code correspondant à la classe attribuée.
+    Classifie un polygone en fonction des pourcentages de classes spécifiques,
+    feuillus/conifères et de sa superficie, selon les règles de décision.
     """
+    # Vérifier si une classe unique domine (> 75%)
+    for classe, pourcentage in pourcentage_classes.items():
+        if pourcentage > seuil:
+            return classe  # Polygone classé directement dans la classe dominante
+
+    # Classification en fonction de la superficie et des pourcentages globaux
     if surf < surf_mini:
         # Petits îlots
         if pourcentage_feuillus > seuil:
@@ -825,34 +788,53 @@ def compute_peuplement_class(stats_zonales,
     melange_conif_prep_feuil = codes_peuplement["melange_conif_prep_feuil"]
     melange_feuil_prep_conif = codes_peuplement["melange_feuil_prep_conif"]
 
-    # Pour chaque polygone
+    # Parcours de chaque polygone
     for stats_poly in stats_zonales:
         total_pixels = sum(stats_poly.values())
-        # Éviter la division par zéro
+
+        # Vérifier si le total est zéro (éviter division par zéro)
         if total_pixels == 0:
-            classes_predites.append(0)  # ou un code "inconnu"
+            logging.warning(
+                "Total de pixels égal à zéro pour un polygone. Classe inconnue attribuée.")
+            classes_predites.append(0)  # Code pour "classe inconnue"
             percentages_feuillus.append(0)
             percentages_coniferes.append(0)
             surfaces.append(0)
             continue
 
-        # Pourcentage de feuillus (ex. classes entre 11 et 14, selon votre nomenclature)
+        # Calcul des pourcentages pour les feuillus et conifères
         pourcentage_feuillus = sum(
             (count / total_pixels) * 100
             for cat, count in stats_poly.items()
-            # Exemple : classes feuillus = 11,12,13,14 -> adapter selon vos codes
             if 10 < int(cat) < 15
         )
-        # Pourcentage de conifères (ex. classes entre 21 et 25)
         pourcentage_coniferes = sum(
             (count / total_pixels) * 100
             for cat, count in stats_poly.items()
             if 20 < int(cat) < 26
         )
+
+        pourcentage_classes = {
+            cat: (count / total_pixels) * 100
+            for cat, count in stats_poly.items()
+        }
+
+        # Vérifier si les catégories feuillus et conifères sont absentes
+        if pourcentage_feuillus == 0 and pourcentage_coniferes == 0:
+            logging.warning(
+                "Aucune catégorie feuillus ou conifères détectée. Classe inconnue attribuée.")
+            classes_predites.append(0)  # Code pour "classe inconnue"
+            percentages_feuillus.append(0)
+            percentages_coniferes.append(0)
+            surfaces.append(total_pixels * pixel_surface)
+            continue
+
+        # Calculer la surface du polygone
         surface_poly = total_pixels * pixel_surface
 
-        # Classification via la fonction
+        # Appliquer les règles de décision
         classe_predite = classify_peuplement_feuillus_coniferes(
+            pourcentage_classes,
             pourcentage_feuillus,
             pourcentage_coniferes,
             seuil_categorie,
@@ -866,6 +848,7 @@ def compute_peuplement_class(stats_zonales,
             melange_feuil_prep_conif
         )
 
+        # Stocker les résultats
         classes_predites.append(classe_predite)
         percentages_feuillus.append(pourcentage_feuillus)
         percentages_coniferes.append(pourcentage_coniferes)
