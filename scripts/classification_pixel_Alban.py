@@ -60,7 +60,6 @@ out_mean_csv = os.path.join(out_classif_folder, 'mean.csv')
 # Sample parameters
 nb_iter = 30
 nb_folds = 5
-nb_folds = 5
 
 logging.info("Création du raster Sample")
 create_raster_sampleimage(sample_filename, image_reference, raster_sample_filename, "Code")
@@ -101,7 +100,6 @@ max_samples = 0.75
 class_weight = "balanced"
 clf = RF(max_depth=max_depth,
         oob_score=oob_score,
-        n_jobs=n_jobs,
         n_jobs=n_jobs,
         class_weight=class_weight,
         max_samples=max_samples)
