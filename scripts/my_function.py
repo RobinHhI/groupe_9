@@ -98,6 +98,7 @@ def cleanup_temp_files(*base_file_paths):
                     f"Erreur lors de la suppression du fichier {file_path} : {e}"
                 )
 
+
 # ================================== #
 # === FONCTIONS POUR LE VECTEUR ==== #
 # ================================== #
@@ -1442,7 +1443,7 @@ def calculer_centroide_et_distances(valeurs_ndvi, niveau="classe", classes=None)
 
 def plot_barchart_distance_classes(distances_par_classe, output_path, groupes):
     """
-    Génère un diagramme en bâton des distances moyennes au centrôide pour chaque classe.
+    Génère un diagramme en bâton des distances moyennes au centroïde pour chaque classe.
 
     Paramètres :
     -----------
@@ -1477,10 +1478,10 @@ def plot_barchart_distance_classes(distances_par_classe, output_path, groupes):
                 ha='center', va='bottom', fontsize=9)
 
     # Personnalisation des axes et du titre
-    ax.set_title("Distance moyenne des pixels au centrôide de leur classe",
+    ax.set_title("Distance moyenne des pixels au centroïde de leur classe",
                  fontsize=14, fontweight="bold")
     ax.set_xlabel("Classe", fontsize=12)
-    ax.set_ylabel("Distance moyenne au centrôide", fontsize=12)
+    ax.set_ylabel("Distance moyenne au centroïde", fontsize=12)
     ax.set_xticks(range(len(classes)))
     ax.set_xticklabels(classes, rotation=45, ha="right", fontsize=9)
 
@@ -1505,14 +1506,14 @@ def plot_barchart_distance_classes(distances_par_classe, output_path, groupes):
 
 def plot_violin_distance_polygons(distances_par_polygone, classes_polygones, output_path, groupes):
     """
-    Génère un violin plot des distances moyennes au centrôide par classe, à l'échelle des polygones.
+    Génère un violin plot des distances moyennes au centroïde par classe, à l'échelle des polygones.
     Les classes pures (Pur) sont affichées en premier (en rouge), et les classes mélange (Mélange) en second (en bleu).
     Un violon par classe.
 
     Paramètres :
     -----------
     distances_par_polygone : list of float
-        Liste des distances moyennes au centrôide pour chaque polygone.
+        Liste des distances moyennes au centroïde pour chaque polygone.
     classes_polygones : list of str
         Liste des classes associées à chaque polygone, dans le même ordre que distances_par_polygone.
     output_path : str
@@ -1572,7 +1573,7 @@ def plot_violin_distance_polygons(distances_par_polygone, classes_polygones, out
     # Personnalisation des axes et du titre
     ax.set_xticks(range(1, len(classes_ordre) + 1))
     ax.set_xticklabels(classes_ordre, fontsize=9, rotation=45, ha='right')
-    ax.set_ylabel("Distance moyenne au centrôide", fontsize=12)
+    ax.set_ylabel("Distance moyenne au centroïde", fontsize=12)
     ax.set_title("Distribution des distances moyennes par polygone, par classe",
                  fontsize=14, fontweight="bold")
 
@@ -1596,6 +1597,7 @@ def plot_violin_distance_polygons(distances_par_polygone, classes_polygones, out
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
     logger.info(f"Graphique sauvegardé : {output_path}")
+
 
 def report_from_dict_to_df(dict_report):
     """
@@ -1738,6 +1740,7 @@ Auteur : [Votre Nom]
 Date : 31 janvier 2025
 """
 
+
 def get_pixel_area(raster_path):
     """
     Renvoie la surface d'un pixel (en m²) à partir de la géotransformation
@@ -1832,6 +1835,7 @@ def classify_peuplement_feuillus_coniferes(pourcentage_feuillus,
             return melange_conif_prep_feuil
         else:
             return melange_feuil_prep_conif
+
 
 def compute_peuplement_class(stats_zonales,
                              pixel_surface,
