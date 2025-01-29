@@ -85,12 +85,13 @@ logging.info(
 start_stats = time.time()
 
 stats_zonales = zonal_stats(
-    gdf=gdf_sample,
-    raster_path=raster_path,
-    all_touched=all_touched,
+    gdf_sample,
+    raster_path,
+    all_touched=True,
     categorical=True,
-    nodata=nodata
+    nodata=0
 )
+
 end_stats = time.time()
 logging.info(
     f"Statistiques zonales calculées en {end_stats - start_stats:.2f} s.")
