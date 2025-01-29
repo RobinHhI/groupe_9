@@ -31,7 +31,7 @@ sys.path.append('libsigma')  # noqa
 from plots import plot_cm
 
 # Import des fonctions stand
-from my_function_lucas import (
+from my_function import (
     get_pixel_area,
     compute_peuplement_class
 )
