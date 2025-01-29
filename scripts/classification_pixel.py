@@ -64,7 +64,7 @@ sample_folder = "groupe_9/results/data/sample"
 pretraitees_folder = "groupe_9/results/data/img_pretraitees"
 sample_filename = os.path.join(sample_folder, "Sample_BD_foret_T31TCJ.shp")
 image_reference = os.path.join(pretraitees_folder, "masque_foret.tif")
-image_filename = os.path.join(pretraitees_folder, "Serie_temp_S2_ndvi.tif")
+image_filename = os.path.join(pretraitees_folder, "Serie_temp_S2_allbands.tif")
 raster_sample_filename = os.path.join(sample_folder, "Sample_BD_foret_T31TCJ.tif")
 raster_sample_id_filename = os.path.join(sample_folder, "Sample_id_BD_foret_T31TCJ.tif")
 
