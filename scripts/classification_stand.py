@@ -22,6 +22,7 @@ import logging
 import pandas as pd
 import numpy as np
 import geopandas as gpd
+from rasterstats import zonal_stats
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 
@@ -31,7 +32,6 @@ from plots import plot_cm
 
 # Import des fonctions stand
 from my_function_lucas import (
-    compute_zonal_statistics,
     get_pixel_area,
     compute_peuplement_class
 )
@@ -83,11 +83,13 @@ logging.info(
     f"Lecture du shapefile : {CHEMINS['sample']} (taille={len(gdf_sample)})")
 
 start_stats = time.time()
-stats_zonales = compute_zonal_statistics(
+
+stats_zonales = zonal_stats(
     gdf=gdf_sample,
     raster_path=raster_path,
-    all_touched=True,
-    nodata=0
+    all_touched=all_touched,
+    categorical=True,
+    nodata=nodata
 )
 end_stats = time.time()
 logging.info(
