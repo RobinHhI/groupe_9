@@ -45,7 +45,7 @@ from plots import plot_cm, plot_mean_class_quality
 
 # personal librairies
 # from my_function_alban import create_raster_sampleimage, report_from_dict_to_df
-from my_function_lucas import cleanup_temp_files, create_raster_sampleimage, report_from_dict_to_df
+from my_function import cleanup_temp_files, create_raster_sampleimage, report_from_dict_to_df
 
 # ---------------------------------------------------------------------------
 # 1) Logger et paramètres
