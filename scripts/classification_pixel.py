@@ -88,6 +88,12 @@ max_samples = 0.75
 class_weight = "balanced"
 n_estimators = 100   # valeur par défaut
 
+# Création du répertoire de sortie si nécessaire
+output_dir = os.path.dirname(out_classif)
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+    print(f"Répertoire de sortie créé : {output_dir}")
+
 # ---------------------------------------------------------------------------
 # 2) Lecture du shapefile + création d'ID_poly
 # ---------------------------------------------------------------------------
