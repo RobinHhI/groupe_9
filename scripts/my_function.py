@@ -75,19 +75,28 @@ def cleanup_temp_files(*base_file_paths):
         Chemins de base des fichiers à supprimer (sans extension spécifique).
         Ex : "temp_classes_dissolues" supprimera tous les fichiers "temp_classes_dissolues.*".
     """
-    extensions = [".shp", ".shx", ".dbf", ".prj",
-                  ".cpg", ".qpj", ".fix", ".shp.xml"]
+    extensions = [
+        ".shp", ".shx", ".dbf", ".prj", ".cpg", ".qpj", ".fix", ".shp.xml"
+    ]  # Extensions associées aux shapefiles et fichiers temporaires
+
     for base_path in base_file_paths:
+        if not base_path or not isinstance(base_path, str):
+            logging.warning(f"Chemin de base invalide : {base_path}")
+            continue
+
         for ext in extensions:
             file_path = f"{base_path}{ext}"
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                    logger.info(f"Fichier temporaire supprimé : {file_path}")
+                    logging.info(f"Fichier temporaire supprimé : {file_path}")
+                else:
+                    logging.debug(
+                        f"Fichier non trouvé (aucune action nécessaire) : {file_path}")
             except Exception as e:
-                logger.error(
-                    f"Erreur lors de la suppression du fichier {file_path} : {e}")
-
+                logging.error(
+                    f"Erreur lors de la suppression du fichier {file_path} : {e}"
+                )
 
 # ================================== #
 # === FONCTIONS POUR LE VECTEUR ==== #
@@ -1587,3 +1596,333 @@ def plot_violin_distance_polygons(distances_par_polygone, classes_polygones, out
     plt.savefig(output_path, dpi=300, bbox_inches="tight")
     plt.close()
     logger.info(f"Graphique sauvegardé : {output_path}")
+
+def report_from_dict_to_df(dict_report):
+    """
+    Convertit un rapport de classification en un DataFrame Pandas.
+
+    Cette fonction prend un dictionnaire généré par un rapport
+    de classification (issu de `classification_report` de scikit-learn),
+    le transforme en DataFrame et élimine les colonnes et lignes non pertinentes.
+
+    Paramètres :
+    ------------
+    dict_report : dict
+        Le dictionnaire contenant les métriques du rapport de classification.
+
+    Retours :
+    ---------
+    report_df : pandas.DataFrame
+        Un DataFrame contenant uniquement les métriques par classe (précision, rappel, F1).
+
+    Exceptions :
+    ------------
+    Retourne un DataFrame vide si l'entrée est invalide.
+    """
+    try:
+        # Conversion du dictionnaire en DataFrame
+        report_df = pd.DataFrame.from_dict(dict_report)
+
+        # Vérifier et supprimer les colonnes non pertinentes si elles existent
+        cols_to_drop = ['accuracy', 'macro avg', 'weighted avg', 'micro avg']
+        for col in cols_to_drop:
+            if col in report_df.columns:
+                report_df.drop(columns=col, inplace=True)
+
+        # Vérifier et supprimer la ligne "support" si elle existe
+        if 'support' in report_df.index:
+            report_df.drop(index='support', inplace=True)
+
+        # Retourner le DataFrame nettoyé
+        return report_df
+
+    except Exception as e:
+        logging.warning(f"Erreur lors de la conversion du rapport : {e}")
+        return pd.DataFrame()  # Retourne un DataFrame vide en cas d'erreur
+
+
+def create_raster_sampleimage(sample_vector, reference_raster, output_path, attribute):
+    """
+    Crée un raster d'échantillonnage à partir d'un vecteur et d'un raster de référence.
+
+    Cette fonction génère un raster en utilisant un vecteur d'échantillons 
+    et un raster de référence, en rasterisant selon un attribut donné.
+
+    Paramètres :
+    ------------
+    sample_vector : str
+        Chemin vers le fichier vecteur contenant les échantillons.
+    reference_raster : str
+        Chemin vers le raster de référence définissant la géométrie et la projection.
+    output_path : str
+        Chemin pour sauvegarder le raster de sortie.
+    attribute : str
+        Nom de l'attribut dans le vecteur à utiliser pour la rasterisation.
+
+    Retours :
+    ---------
+    Aucun. Un fichier raster est généré à l'emplacement `output_path`.
+
+    Exceptions :
+    ------------
+    Lève une exception si le fichier vecteur ou raster de référence ne peut pas être ouvert,
+    ou si la rasterisation échoue.
+    """
+    try:
+        # Vérifier l'existence des fichiers d'entrée
+        if not os.path.exists(sample_vector):
+            raise FileNotFoundError(
+                f"Fichier vecteur introuvable : {sample_vector}")
+        if not os.path.exists(reference_raster):
+            raise FileNotFoundError(
+                f"Raster de référence introuvable : {reference_raster}")
+
+        # Ouvrir le raster de référence
+        ref_ds = gdal.Open(reference_raster, gdal.GA_ReadOnly)
+        if ref_ds is None:
+            raise RuntimeError(
+                f"Impossible d'ouvrir le raster de référence : {reference_raster}")
+
+        # Extraire les propriétés du raster de référence
+        geo_transform = ref_ds.GetGeoTransform()
+        projection = ref_ds.GetProjection()
+        x_pixels = ref_ds.RasterXSize
+        y_pixels = ref_ds.RasterYSize
+
+        # Déterminer le type de données pour le raster de sortie
+        raster_dtype = gdal.GDT_UInt16 if attribute.lower() == "id" else gdal.GDT_Byte
+
+        # Créer un raster en mémoire
+        out_raster = gdal.GetDriverByName("MEM").Create(
+            "", x_pixels, y_pixels, 1, raster_dtype
+        )
+        out_raster.SetGeoTransform(geo_transform)
+        out_raster.SetProjection(projection)
+        out_band = out_raster.GetRasterBand(1)
+        out_band.SetNoDataValue(0)  # NoData = 0
+        out_band.Fill(0)  # Remplir avec la valeur NoData
+
+        # Ouvrir le vecteur
+        vector_ds = gdal.OpenEx(sample_vector, gdal.OF_VECTOR)
+        if vector_ds is None:
+            raise RuntimeError(
+                f"Impossible d'ouvrir le fichier vecteur : {sample_vector}")
+        vector_layer = vector_ds.GetLayer()
+
+        # Rasteriser le vecteur
+        options = [f"ATTRIBUTE={attribute}"]
+        gdal.RasterizeLayer(out_raster, [1], vector_layer, options=options)
+
+        # Sauvegarder le raster sur disque
+        driver = gdal.GetDriverByName("GTiff")
+        driver.CreateCopy(output_path, out_raster, options=["COMPRESS=LZW"])
+
+        logging.info(
+            f"Raster d'échantillonnage créé avec succès : {output_path}")
+
+    except Exception as e:
+        logging.error(
+            f"Erreur lors de la création du raster d'échantillonnage : {e}")
+        raise
+
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+my_function_stand.py
+
+Ce script contient des fonctions utilitaires pour la classification à l'échelle
+des peuplements forestiers.
+
+Auteur : [Votre Nom]
+Date : 31 janvier 2025
+"""
+
+def get_pixel_area(raster_path):
+    """
+    Renvoie la surface d'un pixel (en m²) à partir de la géotransformation
+    du raster.
+
+    Paramètres
+    ----------
+    raster_path : str
+        Chemin vers le fichier raster.
+
+    Retourne
+    -------
+    float
+        Surface d'un pixel en m².
+    """
+    raster = gdal.Open(raster_path)
+    if raster is None:
+        raise FileNotFoundError(
+            f"Impossible d'ouvrir le raster : {raster_path}")
+
+    geo_transform = raster.GetGeoTransform()
+    # Taille du pixel
+    pixel_width = abs(geo_transform[1])
+    pixel_height = abs(geo_transform[5])
+    pixel_surface = pixel_width * pixel_height
+    raster = None  # fermeture
+    return pixel_surface
+
+
+def classify_peuplement_feuillus_coniferes(pourcentage_feuillus,
+                                           pourcentage_coniferes,
+                                           seuil,
+                                           surf,
+                                           surf_mini,
+                                           feuillus_ilots,
+                                           coniferes_ilots,
+                                           melange_feuillus,
+                                           melange_coniferes,
+                                           melange_conif_prep_feuil,
+                                           melange_feuil_prep_conif):
+    """
+    Classifie un polygone en fonction des pourcentages de feuillus/conifères et
+    de sa superficie, selon les règles de décision décrites dans la consigne.
+
+    Paramètres
+    ----------
+    pourcentage_feuillus : float
+        Pourcentage de feuillus dans le polygone.
+    pourcentage_coniferes : float
+        Pourcentage de conifères dans le polygone.
+    seuil : float
+        Seuil de pourcentage pour catégoriser majoritairement feuillu ou conifère.
+    surf : float
+        Superficie totale du polygone (m²).
+    surf_mini : float
+        Seuil de superficie pour différencier petits îlots et grands polygones.
+    feuillus_ilots : int
+        Code de classe pour "îlots feuillus".
+    coniferes_ilots : int
+        Code de classe pour "îlots conifères".
+    melange_feuillus : int
+        Code de classe pour "peuplement feuillus" (mélange).
+    melange_coniferes : int
+        Code de classe pour "peuplement conifères" (mélange).
+    melange_conif_prep_feuil : int
+        Code de classe pour "mélange conifères à prédominance feuillus".
+    melange_feuil_prep_conif : int
+        Code de classe pour "mélange feuillus à prédominance conifères".
+
+    Retourne
+    -------
+    int
+        Code correspondant à la classe attribuée.
+    """
+    if surf < surf_mini:
+        # Petits îlots
+        if pourcentage_feuillus > seuil:
+            return feuillus_ilots
+        elif pourcentage_coniferes > seuil:
+            return coniferes_ilots
+        elif pourcentage_coniferes > pourcentage_feuillus:
+            return melange_conif_prep_feuil
+        else:
+            return melange_feuil_prep_conif
+    else:
+        # Grands polygones
+        if pourcentage_feuillus > seuil:
+            return melange_feuillus
+        elif pourcentage_coniferes > seuil:
+            return melange_coniferes
+        elif pourcentage_coniferes > pourcentage_feuillus:
+            return melange_conif_prep_feuil
+        else:
+            return melange_feuil_prep_conif
+
+def compute_peuplement_class(stats_zonales,
+                             pixel_surface,
+                             seuil_categorie,
+                             surface_mini,
+                             codes_peuplement):
+    """
+    À partir des statistiques zonales et du code de classification,
+    calcule la classe de peuplement pour chaque polygone.
+
+    Paramètres
+    ----------
+    stats_zonales : list of dict
+        Sortie de la fonction compute_zonal_statistics().
+    pixel_surface : float
+        Surface d'un pixel (m²).
+    seuil_categorie : float
+        Seuil pour distinguer majoritairement feuillus ou conifères (en %).
+    surface_mini : float
+        Seuil de superficie pour différencier les petits îlots des grands polygones.
+    codes_peuplement : dict
+        Dictionnaire contenant les codes de classes (ex. "feuillus_ilots": 16, etc.).
+
+    Retourne
+    -------
+    classes_predites : list of int
+        Liste des classes prédites (une par polygone).
+    percentages_feuillus : list of float
+        Liste des pourcentages feuillus.
+    percentages_coniferes : list of float
+        Liste des pourcentages conifères.
+    surfaces : list of float
+        Liste des surfaces des polygones (m²).
+    """
+    classes_predites = []
+    percentages_feuillus = []
+    percentages_coniferes = []
+    surfaces = []
+
+    # Récupération des différents codes
+    feuillus_ilots = codes_peuplement["feuillus_ilots"]
+    melange_feuillus = codes_peuplement["melange_feuillus"]
+    coniferes_ilots = codes_peuplement["coniferes_ilots"]
+    melange_coniferes = codes_peuplement["melange_coniferes"]
+    melange_conif_prep_feuil = codes_peuplement["melange_conif_prep_feuil"]
+    melange_feuil_prep_conif = codes_peuplement["melange_feuil_prep_conif"]
+
+    # Pour chaque polygone
+    for stats_poly in stats_zonales:
+        total_pixels = sum(stats_poly.values())
+        # Éviter la division par zéro
+        if total_pixels == 0:
+            classes_predites.append(0)  # ou un code "inconnu"
+            percentages_feuillus.append(0)
+            percentages_coniferes.append(0)
+            surfaces.append(0)
+            continue
+
+        # Pourcentage de feuillus (ex. classes entre 11 et 14, selon votre nomenclature)
+        pourcentage_feuillus = sum(
+            (count / total_pixels) * 100
+            for cat, count in stats_poly.items()
+            # Exemple : classes feuillus = 11,12,13,14 -> adapter selon vos codes
+            if 10 < int(cat) < 15
+        )
+        # Pourcentage de conifères (ex. classes entre 21 et 25)
+        pourcentage_coniferes = sum(
+            (count / total_pixels) * 100
+            for cat, count in stats_poly.items()
+            if 20 < int(cat) < 26
+        )
+        surface_poly = total_pixels * pixel_surface
+
+        # Classification via la fonction
+        classe_predite = classify_peuplement_feuillus_coniferes(
+            pourcentage_feuillus,
+            pourcentage_coniferes,
+            seuil_categorie,
+            surface_poly,
+            surface_mini,
+            feuillus_ilots,
+            coniferes_ilots,
+            melange_feuillus,
+            melange_coniferes,
+            melange_conif_prep_feuil,
+            melange_feuil_prep_conif
+        )
+
+        classes_predites.append(classe_predite)
+        percentages_feuillus.append(pourcentage_feuillus)
+        percentages_coniferes.append(pourcentage_coniferes)
+        surfaces.append(surface_poly)
+
+    return classes_predites, percentages_feuillus, percentages_coniferes, surfaces
