@@ -95,24 +95,7 @@ if not os.path.exists(output_dir):
     print(f"Répertoire de sortie créé : {output_dir}")
 
 # ---------------------------------------------------------------------------
-# 2) Lecture du shapefile + création d'ID_poly
-# ---------------------------------------------------------------------------
-logging.info("Lecture du shapefile et création ID_poly.")
-gdf = gpd.read_file(sample_filename)
-gdf["ID_poly"] = range(1, len(gdf)+1)
-
-# Création d'un shapefile temporaire sans extension explicite
-temp_shp_id_base = os.path.join(out_classif_folder, "tmp_shp_for_ID")
-for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
-    f_ = temp_shp_id_base + ext
-    if os.path.exists(f_):
-        os.remove(f_)
-
-gdf.to_file(temp_shp_id_base + ".shp", driver="ESRI Shapefile")
-logging.info("Shapefile temporaire ID_poly créé.")
-
-# ---------------------------------------------------------------------------
-# 3) Rasterisation
+# 2) Rasterisation
 # ---------------------------------------------------------------------------
 if not os.path.exists(raster_sample_filename):
     logging.info("Création du raster Code (pour Y).")
@@ -122,12 +105,12 @@ if not os.path.exists(raster_sample_filename):
         raster_sample_filename,
         "Code")
 if not os.path.exists(raster_sample_id_filename):
-    logging.info("Création du raster ID_poly (pour G).")
+    logging.info("Création du raster ID (pour G).")
     create_raster_sampleimage(
-        temp_shp_id_base + ".shp",
+        sample_filename,
         image_reference,
         raster_sample_id_filename,
-        "ID_poly")
+        "ID")
 
 # ---------------------------------------------------------------------------
 # 4) Extraction COMPLETE (X_orig, Y_orig, coords_orig) + G_orig
