@@ -192,8 +192,6 @@ for repetition in range(nb_iter):
 
         # 4 --- Test
         Y_predict = clf.predict(X_test)
-        # 4 --- Test
-        Y_predict = clf.predict(X_test)
 
         list_cm.append(confusion_matrix(Y_test, Y_predict, labels=essence_tree))
         list_accuracy.append(accuracy_score(Y_test, Y_predict))
