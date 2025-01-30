@@ -113,7 +113,7 @@ if not os.path.exists(raster_sample_id_filename):
         "ID")
 
 # ---------------------------------------------------------------------------
-# 4) Extraction COMPLETE (X_orig, Y_orig, coords_orig) + G_orig
+# 3) Extraction COMPLETE (X_orig, Y_orig, coords_orig) + G_orig
 # ---------------------------------------------------------------------------
 logging.info("Obtention du Sample X, Y, t ")
 X, Y, t = cla.get_samples_from_roi(image_filename, raster_sample_filename)
@@ -121,7 +121,7 @@ logging.info("Obtention des groupes")
 _, groups, _ = cla.get_samples_from_roi(image_filename, raster_sample_id_filename)
 
 # ---------------------------------------------------------------------------
-# 5) Filtrage pour train/val
+# 4) Filtrage pour train/val
 # ---------------------------------------------------------------------------
 # Valeurs à supprimer
 values_to_delete = [15, 16, 26, 27, 28, 29]
@@ -137,7 +137,7 @@ list_report = []
 groups = np.squeeze(groups)
 
 # ---------------------------------------------------------------------------
-# 6) Configuration du RandomForest + validation croisée
+# 5) Configuration du RandomForest + validation croisée
 # ---------------------------------------------------------------------------
 # Liste des classes attendues
 essence_tree = [11, 12, 13, 14, 21, 22, 23, 24, 25]
@@ -199,7 +199,7 @@ for repetition in range(nb_iter):
                  f"{int(rep_minutes)} min et {rep_seconds:.2f} s. ***")
 
 # ---------------------------------------------------------------------------
-# 7) Calcul et figures
+# 6) Calcul et figures
 # ---------------------------------------------------------------------------
 arr_acc = np.array(list_accuracy)  # Liste des accuracies de chaque fold
 mean_accuracy = arr_acc.mean()  # Moyenne des accuracies
@@ -254,7 +254,7 @@ finally:
     print("Fichiers temporaires supprimés.")
 
 # ---------------------------------------------------------------------------
-# 7-bis) Sauvegarde d'une matrice de confusion moyenne
+# 6-bis) Sauvegarde d'une matrice de confusion moyenne
 # ---------------------------------------------------------------------------
 # Calcul de la matrice de confusion moyenne
 # shape = (nb_folds_total, n_classes, n_classes)
@@ -276,7 +276,7 @@ plot_cm(
 logging.info(f"Matrice de confusion moyenne sauvegardée : {out_cm_pixel}")
 
 # ---------------------------------------------------------------------------
-# 8) Apprentissage final sur X_f + prediction sur X_orig
+# 7) Apprentissage final sur X_f + prediction sur X_orig
 # ---------------------------------------------------------------------------
 logging.info("Prédiction sur tout le raster (X_orig) pour la carte finale.")
 Y_predict = clf.predict(X)
