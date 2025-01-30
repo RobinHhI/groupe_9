@@ -1645,89 +1645,197 @@ def report_from_dict_to_df(dict_report):
 
 def create_raster_sampleimage(sample_vector, reference_raster, output_path, attribute):
     """
-    Crée un raster d'échantillonnage à partir d'un vecteur et d'un raster de référence.
-
-    Cette fonction génère un raster en utilisant un vecteur d'échantillons 
-    et un raster de référence, en rasterisant selon un attribut donné.
+    Crée un raster forêt pour la classification   :
+        - .
 
     Paramètres :
-    ------------
+    -----------
     sample_vector : str
-        Chemin vers le fichier vecteur contenant les échantillons.
+        Chemin vers le fichier vecteur représentant les zones forestières.
     reference_raster : str
-        Chemin vers le raster de référence définissant la géométrie et la projection.
+        Chemin vers le raster de référence.
+    clip_vector : str
+        Chemin vers le shapefile définissant l'étendue de la zone d'étude.
     output_path : str
-        Chemin pour sauvegarder le raster de sortie.
-    attribute : str
-        Nom de l'attribut dans le vecteur à utiliser pour la rasterisation.
-
-    Retours :
-    ---------
-    Aucun. Un fichier raster est généré à l'emplacement `output_path`.
+        Chemin pour sauvegarder le raster masque final.
 
     Exceptions :
-    ------------
-    Lève une exception si le fichier vecteur ou raster de référence ne peut pas être ouvert,
-    ou si la rasterisation échoue.
+    -----------
+    RuntimeError
+        Si une étape du processus échoue.
     """
     try:
-        # Vérifier l'existence des fichiers d'entrée
-        if not os.path.exists(sample_vector):
-            raise FileNotFoundError(
-                f"Fichier vecteur introuvable : {sample_vector}")
-        if not os.path.exists(reference_raster):
-            raise FileNotFoundError(
-                f"Raster de référence introuvable : {reference_raster}")
+        logger.info("Rasteration à partir du fichier sample forêt...")
+        # Ouvrir le raster du masque
+        reference_ds = gdal.Open(reference_raster)
+        if reference_ds is None:
+            log_error_and_raise(
+                f"Impossible d'ouvrir le raster de reference : {reference_raster}")
 
-        # Ouvrir le raster de référence
-        ref_ds = gdal.Open(reference_raster, gdal.GA_ReadOnly)
-        if ref_ds is None:
-            raise RuntimeError(
-                f"Impossible d'ouvrir le raster de référence : {reference_raster}")
+        logger.info("récupération des propriétés du raster de référence")
+        pixel_width, pixel_height, xmin, ymin, xmax, ymax, crs = get_raster_properties(
+            reference_ds)
 
-        # Extraire les propriétés du raster de référence
-        geo_transform = ref_ds.GetGeoTransform()
-        projection = ref_ds.GetProjection()
-        x_pixels = ref_ds.RasterXSize
-        y_pixels = ref_ds.RasterYSize
+        # Calcul du nombre de pixels en directions x et y
+        x_pixels = int((xmax - xmin) / pixel_width)
+        y_pixels = int((ymax - ymin) / pixel_height)
 
-        # Déterminer le type de données pour le raster de sortie
-        raster_dtype = gdal.GDT_UInt16 if attribute.lower() == "id" else gdal.GDT_Byte
+        # Étape 2 : Création d'un raster en mémoire pour rasteriser le masque vecteur
+        logger.info("Rasterisation du sample forêt...")
+        mem_driver = gdal.GetDriverByName('MEM')
 
-        # Créer un raster en mémoire
-        out_raster = gdal.GetDriverByName("MEM").Create(
-            "", x_pixels, y_pixels, 1, raster_dtype
-        )
-        out_raster.SetGeoTransform(geo_transform)
-        out_raster.SetProjection(projection)
+        if (attribute == "ID") :
+            out_raster = mem_driver.Create(
+                '', x_pixels, y_pixels, 1, gdal.GDT_UInt16)
+        else :    
+            out_raster = mem_driver.Create(
+                '', x_pixels, y_pixels, 1, gdal.GDT_Byte)
+        out_raster.SetGeoTransform(
+            (xmin, pixel_width, 0, ymax, 0, -pixel_height))
+        out_raster.SetProjection(crs)
+
+        # Initialiser le raster avec la valeur 0 (non-forêt)
+        # Les bandes sont indexées à partir de 1
         out_band = out_raster.GetRasterBand(1)
-        out_band.SetNoDataValue(0)  # NoData = 0
-        out_band.Fill(0)  # Remplir avec la valeur NoData
+        out_band.Fill(0)
+        out_band.SetNoDataValue(0)
 
-        # Ouvrir le vecteur
+        # Ouvrir le masque vecteur
         vector_ds = gdal.OpenEx(sample_vector, gdal.OF_VECTOR)
         if vector_ds is None:
-            raise RuntimeError(
+            log_error_and_raise( 
                 f"Impossible d'ouvrir le fichier vecteur : {sample_vector}")
         vector_layer = vector_ds.GetLayer()
+        if (attribute == "ID") :
+            logger.info("Création du fichier temporaire d'identifiant du sample Forêt...")
+             
+            sample_folder = "groupe_9/results/data/sample"
+            filename_tmp = os.path.join(sample_folder, "temp_id.shp")
+                                  
+            # Vérifier si le fichier destination existe déjà
+            if os.path.exists(filename_tmp):
+                os.remove(filename_tmp)
 
-        # Rasteriser le vecteur
-        options = [f"ATTRIBUTE={attribute}"]
-        gdal.RasterizeLayer(out_raster, [1], vector_layer, options=options)
+            # Créer un nouveau fichier de destination
+            driver = ogr.GetDriverByName("ESRI Shapefile")
+            destination_dataset = driver.CreateDataSource(filename_tmp)
+            if destination_dataset is None:
+                log_error_and_raise("Impossible de créer le fichier tmp.")
+                
+            # Créer une nouvelle couche dans le dataset de destination
+            destination_layer = destination_dataset.CreateLayer(
+                vector_layer.GetName(), vector_layer.GetSpatialRef(), 
+                geom_type=vector_layer.GetGeomType(), options=["ENCODING=UTF-8"])
 
-        # Sauvegarder le raster sur disque
-        driver = gdal.GetDriverByName("GTiff")
-        driver.CreateCopy(output_path, out_raster, options=["COMPRESS=LZW"])
+            # Copier les champs de la couche source
+            source_layer_def = vector_layer.GetLayerDefn()
+            for i in range(source_layer_def.GetFieldCount()):
+                field_def = source_layer_def.GetFieldDefn(i)
+                destination_layer.CreateField(field_def)
 
-        logging.info(
-            f"Raster d'échantillonnage créé avec succès : {output_path}")
+            # Parcourir les entités de la couche source
+            for feature in vector_layer:
+                # Créer une nouvelle entité dans la couche de destination
+                new_feature = ogr.Feature(destination_layer.GetLayerDefn())
+
+                # Copier les valeurs des champs
+                FieldCount = source_layer_def.GetFieldCount()
+                for i in range(FieldCount):
+                    Nameref = source_layer_def.GetFieldDefn(i).GetNameRef()
+                    Field = feature.GetField(i)
+                    new_feature.SetField(Nameref, Field)
+
+                # Copier la géométrie
+                geom = feature.GetGeometryRef()
+                new_feature.SetGeometry(geom.Clone())
+
+                # Ajouter la nouvelle entité à la couche de destination
+                destination_layer.CreateFeature(new_feature)
+
+                # Nettoyer
+                new_feature = None
+            
+            # Définir le nom des champs
+            new_field_name = "temp_" + attribute
+
+            # Obtenir la définition des champs
+            layer_def = destination_layer.GetLayerDefn()
+
+            # Vérifier si le champ à modifier existe
+            old_field_index = layer_def.GetFieldIndex(attribute)
+            if old_field_index == -1:
+                log_error_and_raise( f"Erreur : le champ '{attribute}' n'existe pas.")
+
+            # Ajouter un nouveau champ temporaire avec le type souhaité
+            new_field = ogr.FieldDefn(new_field_name, ogr.OFTInteger)  # Exemple : Integer
+            destination_layer.CreateField(new_field)
+
+            # Copier les données de l'ancien champ vers le nouveau champ
+            for feature in destination_layer:
+                FID = feature.GetFID()
+                feature.SetField(new_field_name, FID + 1)  # Conversion en entier
+                destination_layer.SetFeature(feature)
+
+            # Supprimer l'ancien champ
+            destination_layer.DeleteField(old_field_index)
+
+            # Renommer le nouveau champ pour qu'il remplace l'ancien
+            layer_def = destination_layer.GetLayerDefn()  # Rafraîchir la définition
+            src_fdef = layer_def.GetFieldDefn(layer_def.GetFieldIndex(new_field_name))
+            fdef = ogr.FieldDefn(src_fdef.GetName(), src_fdef.GetType())
+            fdef.SetWidth(src_fdef.GetWidth())
+            fdef.SetPrecision(src_fdef.GetPrecision())
+            fdef.SetName(attribute)
+            fdef.SetType(ogr.OFTInteger)
+            new_field_index = layer_def.GetFieldIndex(new_field_name)
+            
+            destination_layer.AlterFieldDefn(new_field_index, fdef, ogr.ALTER_NAME_FLAG)
+            
+            
+        # Rasteriser le sample forêt avec la valeur de l'attribut Code
+        if (attribute == 'ID') : 
+            logger.info("Rasterisation sample Forêt ID...")
+            err = gdal.RasterizeLayer(
+                out_raster, [1], destination_layer, options=["ATTRIBUTE={}".format(attribute)])
+            destination_dataset = None
+        else :
+            logger.info("Rasterisation sample Forêt ...")
+            err = gdal.RasterizeLayer(
+                out_raster, [1], vector_layer, options=["ATTRIBUTE={}".format(attribute)])
+        if err != 0:
+            log_error_and_raise("Échec de la rasterisation.")
+
+        # Fermer le fichier vecteur
+        vector_ds = None
+
+        # Étape 4 : Sauvegarde du masque découpé
+        # Supprimer le fichier existant avant sauvegarde
+        if os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+                logger.info(f"Fichier existant supprimé : {output_path}")
+            except PermissionError:
+                log_error_and_raise(
+                    f"Impossible de supprimer le fichier existant : {output_path}")
+
+        driver = gdal.GetDriverByName('GTiff')
+        output_ds = driver.CreateCopy(
+            output_path, out_raster, options=["COMPRESS=LZW"])
+        if output_ds is None:
+            log_error_and_raise(
+                f"Échec de la sauvegarde du raster sample forêt : {output_path}")
+
+        # Finaliser et fermer les datasets
+        output_ds.FlushCache()
+        output_ds = None
+        out_raster = None
+
+        logger.info(f"Fiche sample forêt rasterisé sauvegardé : {output_path}")
 
     except Exception as e:
-        logging.error(
-            f"Erreur lors de la création du raster d'échantillonnage : {e}")
-        raise
-
-
+        log_error_and_raise(
+            f"Erreur pendant la création du raster sample forêt : {e}")
+        
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
