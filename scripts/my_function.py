@@ -1726,18 +1726,6 @@ def create_raster_sampleimage(sample_vector, reference_raster, output_path, attr
         logging.error(
             f"Erreur lors de la création du raster d'échantillonnage : {e}")
         raise
-        
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-my_function_stand.py
-
-Ce script contient des fonctions utilitaires pour la classification à l'échelle
-des peuplements forestiers.
-
-Auteur : [Votre Nom]
-Date : 31 janvier 2025
-"""
 
 
 def get_pixel_area(raster_path):
