@@ -44,7 +44,6 @@ import read_and_write as rw
 from plots import plot_cm, plot_mean_class_quality
 
 # personal librairies
-# from my_function_alban import create_raster_sampleimage, report_from_dict_to_df
 from my_function import cleanup_temp_files, create_raster_sampleimage, report_from_dict_to_df
 
 # ---------------------------------------------------------------------------
@@ -95,25 +94,46 @@ if not os.path.exists(output_dir):
     print(f"Répertoire de sortie créé : {output_dir}")
 
 # ---------------------------------------------------------------------------
-# 2) Rasterisation
+# 2) Lecture du shapefile + création d'ID_poly
 # ---------------------------------------------------------------------------
-if not os.path.exists(raster_sample_filename):
-    logging.info("Création du raster Code (pour Y).")
-    create_raster_sampleimage(
-        sample_filename,
-        image_reference,
-        raster_sample_filename,
-        "Code")
-if not os.path.exists(raster_sample_id_filename):
-    logging.info("Création du raster ID (pour G).")
-    create_raster_sampleimage(
-        sample_filename,
-        image_reference,
-        raster_sample_id_filename,
-        "ID")
+logging.info("Lecture du shapefile et création ID_poly.")
+gdf = gpd.read_file(shp_original)
+gdf["ID_poly"] = range(1, len(gdf)+1)
+
+# Création d'un shapefile temporaire sans extension explicite
+temp_shp_id_base = os.path.join(out_classif_folder, "tmp_shp_for_ID")
+for ext in [".shp", ".shx", ".dbf", ".prj", ".cpg"]:
+    f_ = temp_shp_id_base + ext
+    if os.path.exists(f_):
+        os.remove(f_)
+
+gdf.to_file(temp_shp_id_base + ".shp", driver="ESRI Shapefile")
+logging.info("Shapefile temporaire ID_poly créé.")
 
 # ---------------------------------------------------------------------------
-# 3) Extraction COMPLETE (X_orig, Y_orig, coords_orig) + G_orig
+# 3) Rasterisation
+# ---------------------------------------------------------------------------
+if not os.path.exists(raster_code_path):
+    logging.info("Création du raster Code (pour Y).")
+    create_raster_sampleimage(
+        sample_vector=shp_original,
+        reference_raster=image_reference,
+        output_path=raster_code_path,
+        attribute="Code"
+    )
+
+if not os.path.exists(raster_id_path):
+    logging.info("Création du raster ID_poly (pour G).")
+    create_raster_sampleimage(
+        sample_vector=temp_shp_id_base + ".shp",
+        reference_raster=image_reference,
+        output_path=raster_id_path,
+        attribute="ID_poly"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 4) Extraction COMPLETE (X_orig, Y_orig, coords_orig) + G_orig
 # ---------------------------------------------------------------------------
 logging.info("Obtention du Sample X, Y, t ")
 X, Y, t = cla.get_samples_from_roi(image_filename, raster_sample_filename)
@@ -137,7 +157,7 @@ list_report = []
 groups = np.squeeze(groups)
 
 # ---------------------------------------------------------------------------
-# 5) Configuration du RandomForest + validation croisée
+# 6) Configuration du RandomForest + validation croisée
 # ---------------------------------------------------------------------------
 # Liste des classes attendues
 essence_tree = [11, 12, 13, 14, 21, 22, 23, 24, 25]
@@ -199,7 +219,7 @@ for repetition in range(nb_iter):
                  f"{int(rep_minutes)} min et {rep_seconds:.2f} s. ***")
 
 # ---------------------------------------------------------------------------
-# 6) Calcul et figures
+# 7) Calcul et figures
 # ---------------------------------------------------------------------------
 arr_acc = np.array(list_accuracy)  # Liste des accuracies de chaque fold
 mean_accuracy = arr_acc.mean()  # Moyenne des accuracies
@@ -254,7 +274,7 @@ finally:
     print("Fichiers temporaires supprimés.")
 
 # ---------------------------------------------------------------------------
-# 6-bis) Sauvegarde d'une matrice de confusion moyenne
+# 7-bis) Sauvegarde d'une matrice de confusion moyenne
 # ---------------------------------------------------------------------------
 # Calcul de la matrice de confusion moyenne
 # shape = (nb_folds_total, n_classes, n_classes)
@@ -276,7 +296,7 @@ plot_cm(
 logging.info(f"Matrice de confusion moyenne sauvegardée : {out_cm_pixel}")
 
 # ---------------------------------------------------------------------------
-# 7) Apprentissage final sur X_f + prediction sur X_orig
+# 8) Apprentissage final sur X_f + prediction sur X_orig
 # ---------------------------------------------------------------------------
 logging.info("Prédiction sur tout le raster (X_orig) pour la carte finale.")
 Y_predict = clf.predict(X)
