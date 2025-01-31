@@ -61,21 +61,25 @@ logging.info(
 # inputs
 sample_folder = "groupe_9/results/data/sample"
 pretraitees_folder = "groupe_9/results/data/img_pretraitees"
-sample_filename = os.path.join(sample_folder, "Sample_BD_foret_T31TCJ.shp")
+out_classif_folder = "groupe_9/results/data/classif"
+os.makedirs(out_classif_folder, exist_ok=True)
+
+shp_original = os.path.join(sample_folder, "Sample_BD_foret_T31TCJ.shp")
 image_reference = os.path.join(pretraitees_folder, "masque_foret.tif")
 image_filename = os.path.join(pretraitees_folder, "Serie_temp_S2_allbands.tif")
-raster_sample_filename = os.path.join(sample_folder, "Sample_BD_foret_T31TCJ.tif")
-raster_sample_id_filename = os.path.join(sample_folder, "Sample_id_BD_foret_T31TCJ.tif")
 
-# outputs
-out_classif_folder = 'groupe_9/results/data/classif'
-out_classif = os.path.join(out_classif_folder, 'carte_essences_echelle_pixel.tif')
-out_std_dev_mean = os.path.join(out_classif_folder, 'Std_Dev_and_Mean.png')
-out_std_csv = os.path.join(out_classif_folder, 'std_deviation.csv')
-out_mean_csv = os.path.join(out_classif_folder, 'mean.csv')
+# Fichiers de sortie
+raster_code_path = os.path.join(
+    out_classif_folder, "Sample_BD_foret_T31TCJ.tif")
+raster_id_path = os.path.join(
+    out_classif_folder, "Sample_id_BD_foret_T31TCJ.tif")
+
+out_classif = os.path.join(
+    out_classif_folder, "carte_essences_echelle_pixel.tif")
+out_mean_csv = os.path.join(out_classif_folder, "mean.csv")
+out_std_csv = os.path.join(out_classif_folder, "std.csv")
 out_fig_acc = os.path.join(out_classif_folder, "accuracy_distribution.png")
-out_cm_pixel = os.path.join(
-    out_classif_folder, "confusion_matrix_pixel_mean.png")
+out_fig_report = os.path.join(out_classif_folder, "Std_Dev_and_Mean.png")
 
 # Paramètres du RandomForest
 nb_iter = 30
