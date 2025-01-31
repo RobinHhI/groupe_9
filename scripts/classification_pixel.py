@@ -140,9 +140,9 @@ if not os.path.exists(raster_id_path):
 # 4) Extraction COMPLETE (X_orig, Y_orig, coords_orig) + G_orig
 # ---------------------------------------------------------------------------
 logging.info("Obtention du Sample X, Y, t ")
-X, Y, t = cla.get_samples_from_roi(image_filename, raster_sample_filename)
+X, Y, t = cla.get_samples_from_roi(image_filename, raster_code_path)
 logging.info("Obtention des groupes")
-_, groups, _ = cla.get_samples_from_roi(image_filename, raster_sample_id_filename)
+_, groups, _ = cla.get_samples_from_roi(image_filename, raster_id_path)
 
 # ---------------------------------------------------------------------------
 # 4) Filtrage pour train/val
