@@ -23,3 +23,6 @@ temp_*.cpg
 
 # Fichiers de log
 log.txt
+
+# Rapport
+*.docx
